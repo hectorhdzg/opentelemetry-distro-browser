@@ -1,0 +1,99 @@
+name: PR validation
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: ESLint, Prettier, and TypeScript
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check formatting
+        run: npm run format
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Check types
+        run: npm run typecheck
+
+  tests:
+    name: Browser tests, API, and bundles (Node ${{ matrix.node-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ["22", "24"]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Chromium and system dependencies
+        run: npm run test:install-browsers -- --with-deps
+
+      - name: Run Vitest unit tests in Chromium with coverage
+        run: npm run test:coverage
+
+      - name: Build and minify bundles
+        run: npm run build
+
+      - name: Verify package outputs
+        run: npm run test:build
+
+      - name: Run browser bundle integration tests in Chromium
+        run: npm run test:integration
+
+      - name: Check public API report
+        run: npm run api:check
+
+      - name: Report bundle sizes
+        run: npm run size
+
+      - name: Generate machine-readable size report
+        run: npm run size:report
+
+      - name: Check package contents
+        run: npm pack --dry-run --ignore-scripts
+
+      - name: Upload bundle-size reports
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bundle-reports-node-${{ matrix.node-version }}
+          path: |
+            reports/bundle-size.json
+            reports/bundle-stats.html
+          if-no-files-found: error
+          retention-days: 14

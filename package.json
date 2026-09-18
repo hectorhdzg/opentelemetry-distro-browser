@@ -2,22 +2,86 @@
   "name": "@microsoft/opentelemetry-distro-browser",
   "version": "0.0.0",
   "private": true,
+  "description": "OpenTelemetry distribution for the browser",
+  "license": "MIT",
   "type": "module",
+  "main": "./dist/commonjs/index.cjs",
+  "module": "./dist/esm/index.js",
+  "types": "./dist/esm/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/esm/index.d.ts",
+        "default": "./dist/esm/index.js"
+      },
+      "require": {
+        "types": "./dist/commonjs/index.d.cts",
+        "default": "./dist/commonjs/index.cjs"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": "^22.22.2 || ^24.15.0 || >=26.0.0",
+    "npm": ">=10"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/microsoft/opentelemetry-distro-browser.git"
+  },
   "scripts": {
-    "check": "npm run lint && npm run format:check",
-    "format": "prettier . --write",
-    "format:check": "prettier . --check",
+    "clean": "node scripts/clean.mjs",
+    "build": "npm run clean && rollup --config",
+    "typecheck": "tsc --noEmit -p tsconfig.src.json && tsc --noEmit -p tsconfig.test.json",
     "lint": "eslint . --max-warnings 0",
-    "lint:fix": "eslint . --fix"
+    "lint:fix": "npm run lint -- --fix",
+    "format": "prettier --check .",
+    "format:check": "npm run format",
+    "format:fix": "prettier --write .",
+    "test": "vitest run",
+    "test:unit": "vitest run --config vitest.unit.config.ts",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:install-browsers": "playwright install chromium",
+    "test:watch": "vitest",
+    "test:coverage": "npm run test:unit -- --coverage",
+    "test:build": "node --test test/build/package.test.mjs",
+    "api:check": "api-extractor run",
+    "api:update": "npm run build && api-extractor run --local",
+    "size": "size-limit",
+    "size:report": "size-limit --json > reports/bundle-size.json",
+    "check": "npm run format && npm run lint && npm run typecheck && npm run test:coverage && npm run build && npm run test:build && npm run test:integration && npm run api:check && npm run size && npm run size:report",
+    "prepack": "npm run build"
   },
   "devDependencies": {
-    "@eslint/js": "10.0.1",
-    "eslint": "10.10.0",
-    "eslint-config-prettier": "10.1.8",
+    "@eslint/js": "^10.0.1",
+    "@microsoft/api-extractor": "^7.59.1",
+    "@rollup/plugin-commonjs": "^29.0.3",
+    "@rollup/plugin-node-resolve": "^16.0.3",
+    "@rollup/plugin-terser": "^1.0.0",
+    "@rollup/plugin-typescript": "^12.3.0",
+    "@size-limit/file": "13.0.3",
+    "@types/node": "^22.20.2",
+    "@vitest/browser-playwright": "5.0.0",
+    "@vitest/coverage-v8": "5.0.0",
+    "eslint": "^10.10.0",
+    "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-security": "4.0.1",
-    "globals": "17.12.0",
+    "globals": "^17.12.0",
+    "playwright": "^1.63.0",
     "prettier": "3.9.6",
-    "typescript": "5.9.3",
-    "typescript-eslint": "8.70.0"
+    "rollup": "^4.63.1",
+    "rollup-plugin-dts": "^6.5.1",
+    "rollup-plugin-visualizer": "^7.1.1",
+    "size-limit": "13.0.3",
+    "tslib": "^2.8.1",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.70.0",
+    "vitest": "5.0.0"
   }
 }

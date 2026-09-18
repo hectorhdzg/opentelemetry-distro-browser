@@ -59,7 +59,6 @@
     "prepack": "npm run build"
   },
   "dependencies": {
-    "@opentelemetry/api": "1.9.1",
     "@opentelemetry/api-logs": "0.222.0",
     "@opentelemetry/browser-instrumentation": "0.8.1",
     "@opentelemetry/core": "2.11.0",
@@ -72,9 +71,13 @@
     "@opentelemetry/sdk-trace-web": "2.11.0",
     "@opentelemetry/semantic-conventions": "1.43.0"
   },
+  "peerDependencies": {
+    "@opentelemetry/api": ">=1.9.1 <1.10.0"
+  },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@microsoft/api-extractor": "^7.59.1",
+    "@opentelemetry/api": "1.9.1",
     "@rollup/plugin-commonjs": "^29.0.3",
     "@rollup/plugin-node-resolve": "^16.0.3",
     "@rollup/plugin-terser": "^1.0.0",

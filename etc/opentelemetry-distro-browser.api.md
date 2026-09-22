@@ -6,16 +6,8 @@
 
 import { DetectedResource } from '@opentelemetry/resources';
 import { LogRecordProcessor } from '@opentelemetry/sdk-logs';
-import { Resource } from '@opentelemetry/resources';
 import { ResourceDetector } from '@opentelemetry/resources';
 import { SpanProcessor } from '@opentelemetry/sdk-trace-base';
-import { TextMapPropagator } from '@opentelemetry/api';
-
-// @public
-export interface AzureMonitorOptions {
-    readonly connectionString: string;
-    readonly disableBeacon?: boolean;
-}
 
 // @public
 export class BrowserDetector implements ResourceDetector {
@@ -27,32 +19,20 @@ export const browserDetector: BrowserDetector;
 
 // @public
 export interface MicrosoftOpenTelemetryBrowser {
-    forceFlush(): Promise<void>;
     shutdown(): Promise<void>;
 }
 
 // @public
 export interface MicrosoftOpenTelemetryBrowserOptions {
-    readonly azureMonitor?: AzureMonitorOptions;
-    readonly logRecordProcessors?: readonly LogRecordProcessor[];
-    readonly otlp?: OtlpOptions;
-    readonly propagator?: TextMapPropagator;
-    readonly resource?: Resource;
-    readonly samplingRatio?: number;
-    readonly spanProcessors?: readonly SpanProcessor[];
+    logRecordProcessors?: LogRecordProcessor[];
+    spanProcessors?: SpanProcessor[];
 }
 
 // @public
 export const OPENTELEMETRY_BROWSER_VERSION: string;
 
 // @public
-export interface OtlpOptions {
-    readonly endpoint: string;
-    readonly headers?: Readonly<Record<string, string>>;
-}
-
-// @public
-export function useMicrosoftOpenTelemetry(options: MicrosoftOpenTelemetryBrowserOptions): MicrosoftOpenTelemetryBrowser;
+export function useMicrosoftOpenTelemetry(options?: MicrosoftOpenTelemetryBrowserOptions): MicrosoftOpenTelemetryBrowser;
 
 // @public
 export class UserAgentDetector implements ResourceDetector {

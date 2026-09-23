@@ -10,6 +10,7 @@ export default defineConfig({
       "@opentelemetry/browser-instrumentation/experimental/navigation",
       "@opentelemetry/browser-sdk",
       "@opentelemetry/core",
+      "@opentelemetry/instrumentation",
       "@opentelemetry/resources",
       "@opentelemetry/sdk-logs",
       "@opentelemetry/sdk-trace-base",

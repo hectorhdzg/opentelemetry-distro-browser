@@ -14,6 +14,7 @@ import type { ResourceTimingInstrumentationConfig } from "@opentelemetry/browser
 import type { UserActionInstrumentationConfig } from "@opentelemetry/browser-instrumentation/experimental/user-action";
 import type { WebVitalsInstrumentationConfig } from "@opentelemetry/browser-instrumentation/experimental/web-vitals";
 import type { XhrInstrumentationConfig } from "@opentelemetry/browser-instrumentation/experimental/xhr";
+import type { PageViewInstrumentationConfig } from "./instrumentation/pageView/types.js";
 
 /**
  * Selects and configures the instrumentations that `getInstrumentations` constructs.
@@ -108,6 +109,18 @@ export interface MicrosoftOpenTelemetryBrowserOptions {
    * Configure collection filters and sanitization on each instance before registration.
    */
   instrumentations?: readonly BrowserInstrumentation[];
+  /**
+   * Page-view collection, which this distribution owns and turns on by itself.
+   *
+   * @remarks
+   * Emits one `browser.page_view` log record per navigation, covering the initial document load
+   * and subsequent route changes, and mints a per-navigation correlation id.
+   *
+   * Collection is on by default; set `enabled: false` to turn it off. Doing so stops collection
+   * but does not remove the implementation from the bundle, because a bundler resolves imports
+   * long before this object exists.
+   */
+  pageView?: PageViewInstrumentationConfig;
 }
 
 /**

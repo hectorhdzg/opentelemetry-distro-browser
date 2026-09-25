@@ -63,7 +63,7 @@ for (const file of ["index.js", "index.min.js"]) {
     });
     const navigationDisable = vi.spyOn(navigation, "disable");
     const httpDisable = vi.spyOn(http, "disable");
-    const handle = distro.useMicrosoftOpenTelemetry({
+    const handle = await distro.useMicrosoftOpenTelemetry({
       ...pipeline.options,
       instrumentations: Object.freeze([navigation, http]),
     });
@@ -121,7 +121,7 @@ for (const file of ["index.js", "index.min.js"]) {
     const pipeline = createInMemoryPipeline();
     const navigation = new NavigationInstrumentation();
     const enable = vi.spyOn(navigation, "enable");
-    const handle = distro.useMicrosoftOpenTelemetry({
+    const handle = await distro.useMicrosoftOpenTelemetry({
       ...pipeline.options,
       instrumentations: [navigation],
       // This covers rebinding, so the distribution's own page view is switched off to keep the
@@ -147,7 +147,7 @@ for (const file of ["index.js", "index.min.js"]) {
     const pushBefore = history.pushState;
     // Page view is owned by the distribution and on by default, so switching it off is what
     // leaves the page untouched.
-    const handle = distro.useMicrosoftOpenTelemetry({
+    const handle = await distro.useMicrosoftOpenTelemetry({
       ...pipeline.options,
       pageView: { enabled: false },
     });
@@ -162,7 +162,7 @@ for (const file of ["index.js", "index.min.js"]) {
   it(`collects page views with no instrumentation supplied through ${file}`, async () => {
     const distro = await loadDistro();
     const pipeline = createInMemoryPipeline();
-    const handle = distro.useMicrosoftOpenTelemetry(pipeline.options);
+    const handle = await distro.useMicrosoftOpenTelemetry(pipeline.options);
     handles.add(handle);
     history.pushState(null, "", "/owned-by-the-distro");
     await pipeline.logProcessor.forceFlush();

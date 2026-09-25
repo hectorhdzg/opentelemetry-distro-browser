@@ -41,6 +41,9 @@ export interface MicrosoftOpenTelemetryBrowserOptions {
     instrumentations?: readonly BrowserInstrumentation[];
     logRecordProcessors?: LogRecordProcessor[];
     pageView?: PageViewInstrumentationConfig;
+    session?: {
+        enabled?: boolean;
+    };
     spanProcessors?: SpanProcessor[];
 }
 
@@ -58,7 +61,7 @@ export interface PageViewInstrumentationConfig {
 }
 
 // @public
-export function useMicrosoftOpenTelemetry(options?: MicrosoftOpenTelemetryBrowserOptions): MicrosoftOpenTelemetryBrowser;
+export function useMicrosoftOpenTelemetry(options?: MicrosoftOpenTelemetryBrowserOptions): Promise<MicrosoftOpenTelemetryBrowser>;
 
 // @public
 export class UserAgentDetector implements ResourceDetector {

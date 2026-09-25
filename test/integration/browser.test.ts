@@ -36,7 +36,10 @@ it.each(["index.js", "index.min.js"])(
     const pipeline = createInMemoryPipeline();
     const tracer = trace.getTracer("browser-consumer");
     const logger = logs.getLogger("browser-consumer");
-    const telemetry = distro.useMicrosoftOpenTelemetry(pipeline.options);
+    const telemetry = await distro.useMicrosoftOpenTelemetry({
+      ...pipeline.options,
+      session: { enabled: true },
+    });
     try {
       const span = tracer.startSpan("before-init");
       logger.emit({
@@ -52,6 +55,27 @@ it.each(["index.js", "index.min.js"])(
       expect(spans.map((record) => record.name)).toEqual(["before-init", "after-init"]);
       expect(records.map((record) => record.eventName)).toEqual(["before-init", "after-init"]);
       expect(records[0].spanContext).toEqual(spans[0].spanContext());
+      const sessionId = spans[0].attributes["session.id"];
+      expect(sessionId).toMatch(/^[0-9a-f]{32}$/);
+      for (const record of [...spans, ...records]) {
+        expect(record.attributes["session.id"]).toBe(sessionId);
+      }
+      tracer
+        .startSpan("application-session", {
+          attributes: { "session.id": "application-span" },
+        })
+        .end();
+      logger.emit({
+        eventName: "application-session",
+        attributes: { "session.id": "application-log" },
+      });
+      await Promise.all([pipeline.spanProcessor.forceFlush(), pipeline.logProcessor.forceFlush()]);
+      expect(pipeline.spanExporter.getFinishedSpans().at(-1)?.attributes["session.id"]).toBe(
+        "application-span",
+      );
+      expect(pipeline.logExporter.getFinishedLogRecords().at(-1)?.attributes["session.id"]).toBe(
+        "application-log",
+      );
     } finally {
       await telemetry.shutdown();
     }

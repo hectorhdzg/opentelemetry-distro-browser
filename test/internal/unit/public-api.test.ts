@@ -17,9 +17,14 @@ it("exposes distro-owned configuration and lifecycle contracts", () => {
   expectTypeOf(useMicrosoftOpenTelemetry)
     .parameter(0)
     .toEqualTypeOf<MicrosoftOpenTelemetryBrowserOptions | undefined>();
-  expectTypeOf(useMicrosoftOpenTelemetry).returns.toEqualTypeOf<MicrosoftOpenTelemetryBrowser>();
+  expectTypeOf(useMicrosoftOpenTelemetry).returns.toEqualTypeOf<
+    Promise<MicrosoftOpenTelemetryBrowser>
+  >();
   expectTypeOf<keyof MicrosoftOpenTelemetryBrowserOptions>().toEqualTypeOf<
-    "spanProcessors" | "logRecordProcessors" | "instrumentations" | "pageView"
+    "spanProcessors" | "logRecordProcessors" | "instrumentations" | "pageView" | "session"
+  >();
+  expectTypeOf<MicrosoftOpenTelemetryBrowserOptions["session"]>().toEqualTypeOf<
+    { enabled?: boolean } | undefined
   >();
   expectTypeOf<MicrosoftOpenTelemetryBrowserOptions["spanProcessors"]>().toEqualTypeOf<
     SpanProcessor[] | undefined

@@ -25,7 +25,7 @@ let handle: MicrosoftOpenTelemetryBrowser | undefined;
 
 async function start(options: InstrumentationOptions = {}): Promise<void> {
   pipeline = createInMemoryPipeline();
-  handle = useMicrosoftOpenTelemetry({
+  handle = await useMicrosoftOpenTelemetry({
     ...pipeline.options,
     instrumentations: await getInstrumentations(options),
   });

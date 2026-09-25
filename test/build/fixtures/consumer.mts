@@ -26,6 +26,7 @@ export const instrumentation: BrowserInstrumentation = {
   disable() {},
 };
 export const options: MicrosoftOpenTelemetryBrowserOptions = {
+  session: { enabled: true },
   instrumentations: Object.freeze([instrumentation]),
   spanProcessors: [
     new BatchSpanProcessor(
@@ -40,13 +41,16 @@ export const options: MicrosoftOpenTelemetryBrowserOptions = {
 };
 export const initialize: (
   config: MicrosoftOpenTelemetryBrowserOptions,
-) => MicrosoftOpenTelemetryBrowser = useMicrosoftOpenTelemetry;
+) => Promise<MicrosoftOpenTelemetryBrowser> = useMicrosoftOpenTelemetry;
 // @ts-expect-error The previous distribution-specific option is no longer supported.
 useMicrosoftOpenTelemetry({ samplingRatio: 1 });
 // @ts-expect-error Service/resource configuration is not part of the supported options yet.
 useMicrosoftOpenTelemetry({ serviceName: "consumer" });
 // @ts-expect-error Upstream SDK controls are not exposed by the distro.
 useMicrosoftOpenTelemetry({ disabled: true });
+useMicrosoftOpenTelemetry({ session: { enabled: false } });
+// @ts-expect-error Session timeouts remain internal fixed defaults.
+useMicrosoftOpenTelemetry({ session: { inactivityTimeout: 60 } });
 // @ts-expect-error Configure exporters through standard processors, not distro-specific options.
 useMicrosoftOpenTelemetry({ otlp: { endpoint: "https://example.test" } });
 // @ts-expect-error Configure exporters through standard processors, not upstream exportConfig.

@@ -37,7 +37,7 @@ function createInstrumentation(enabled: boolean | undefined = false) {
   };
 }
 
-function initialize(
+async function initialize(
   instrumentations: readonly BrowserInstrumentation[],
   options: Partial<MicrosoftOpenTelemetryBrowserOptions> = {},
 ) {
@@ -45,7 +45,7 @@ function initialize(
   vi.mocked(startBrowserSdk).mockReturnValueOnce(sdk);
   // Page view is owned by the distribution and on by default. These tests cover the registration
   // mechanics for caller-supplied instances, so it is switched off to keep the list exact.
-  const handle = useMicrosoftOpenTelemetry({
+  const handle = await useMicrosoftOpenTelemetry({
     instrumentations,
     pageView: { enabled: false },
     ...options,
@@ -56,7 +56,7 @@ function initialize(
 
 it("binds providers after SDK startup and before enabling deferred instrumentation", async () => {
   const instrumentation = createInstrumentation();
-  const { handle, sdk } = initialize(Object.freeze([instrumentation]));
+  const { handle, sdk } = await initialize(Object.freeze([instrumentation]));
   expect(instrumentation.setTracerProvider).toHaveBeenCalledExactlyOnceWith(
     trace.getTracerProvider(),
   );
@@ -72,40 +72,42 @@ it("binds providers after SDK startup and before enabling deferred instrumentati
   expect(instrumentation.disable).toHaveBeenCalledBefore(sdk.shutdown);
 });
 
-it("rebinds already-enabled instrumentation without enabling it twice", () => {
+it("rebinds already-enabled instrumentation without enabling it twice", async () => {
   const instrumentation = createInstrumentation(true);
-  initialize([instrumentation]);
+  await initialize([instrumentation]);
   expect(instrumentation.setTracerProvider).toHaveBeenCalledOnce();
   expect(instrumentation.setLoggerProvider).toHaveBeenCalledOnce();
   expect(instrumentation.enable).not.toHaveBeenCalled();
 });
 
-it("supports trace-only instrumentation and an unspecified enabled state", () => {
+it("supports trace-only instrumentation and an unspecified enabled state", async () => {
   const instrumentation = createInstrumentation();
   const { setLoggerProvider: _setLoggerProvider, ...traceOnly } = instrumentation;
   traceOnly.getConfig.mockReturnValueOnce({});
-  initialize([traceOnly]);
+  await initialize([traceOnly]);
   expect(traceOnly.setTracerProvider).toHaveBeenCalledOnce();
   expect(traceOnly.enable).toHaveBeenCalledOnce();
 });
 
-it("does not register instances omitted by the caller", () => {
+it("does not register instances omitted by the caller", async () => {
   const selected = createInstrumentation();
   const omitted = createInstrumentation();
-  initialize([selected]);
+  await initialize([selected]);
   expect(omitted.setTracerProvider).not.toHaveBeenCalled();
   expect(omitted.setLoggerProvider).not.toHaveBeenCalled();
   expect(omitted.enable).not.toHaveBeenCalled();
   expect(omitted.disable).not.toHaveBeenCalled();
 });
 
-it("retains the upstream handle when nothing at all is registered", () => {
-  const { handle, sdk } = initialize([]);
-  expect(handle).toBe(sdk);
+it("owns shutdown even when no instrumentation is selected", async () => {
+  const { handle, sdk } = await initialize([]);
+  await handle.shutdown();
+  await handle.shutdown();
+  expect(sdk.shutdown).toHaveBeenCalledOnce();
 });
 
-it("wraps the upstream handle for the instrumentation the distribution owns", () => {
-  const { handle, sdk } = initialize([], { pageView: undefined });
+it("wraps the upstream handle for the instrumentation the distribution owns", async () => {
+  const { handle, sdk } = await initialize([], { pageView: undefined });
   expect(handle).not.toBe(sdk);
 });
 
@@ -113,7 +115,7 @@ it("snapshots the supplied list and cleans up once in reverse registration order
   const first = createInstrumentation();
   const second = createInstrumentation();
   const list = [first, second];
-  const { handle, sdk } = initialize(list);
+  const { handle, sdk } = await initialize(list);
   list.length = 0;
   const shutdown = handle.shutdown();
   expect(handle.shutdown()).toBe(shutdown);
@@ -133,7 +135,7 @@ it("continues cleanup and preserves a single instrumentation failure", async () 
   second.disable.mockImplementation(() => {
     throw failure;
   });
-  const { handle, sdk } = initialize([first, second]);
+  const { handle, sdk } = await initialize([first, second]);
   handles.delete(handle);
   await expect(handle.shutdown()).rejects.toBe(failure);
   await expect(handle.shutdown()).rejects.toBe(failure);
@@ -149,7 +151,7 @@ it("reports all instrumentation and SDK shutdown failures", async () => {
   instrumentation.disable.mockImplementation(() => {
     throw disableFailure;
   });
-  const { handle, sdk } = initialize([instrumentation]);
+  const { handle, sdk } = await initialize([instrumentation]);
   sdk.shutdown.mockRejectedValueOnce(sdkFailure);
   handles.delete(handle);
   await expect(handle.shutdown()).rejects.toMatchObject({
@@ -161,7 +163,7 @@ it("reports all instrumentation and SDK shutdown failures", async () => {
 it("propagates an SDK shutdown failure after disabling instrumentation", async () => {
   const instrumentation = createInstrumentation();
   const failure = new Error("SDK shutdown failed");
-  const { handle, sdk } = initialize([instrumentation]);
+  const { handle, sdk } = await initialize([instrumentation]);
   sdk.shutdown.mockRejectedValueOnce(failure);
   handles.delete(handle);
   await expect(handle.shutdown()).rejects.toBe(failure);
@@ -180,9 +182,9 @@ it.each(["setTracerProvider", "setLoggerProvider", "getConfig", "enable"] as con
     });
     const sdk = { shutdown: vi.fn(async () => {}) };
     vi.mocked(startBrowserSdk).mockReturnValueOnce(sdk);
-    expect(() => useMicrosoftOpenTelemetry({ instrumentations: [first, failing, last] })).toThrow(
-      failure,
-    );
+    await expect(
+      useMicrosoftOpenTelemetry({ instrumentations: [first, failing, last] }),
+    ).rejects.toThrow(failure);
     expect(last.disable).toHaveBeenCalledBefore(failing.disable);
     expect(failing.disable).toHaveBeenCalledBefore(first.disable);
     expect(first.disable).toHaveBeenCalledBefore(sdk.shutdown);
@@ -202,11 +204,11 @@ it("reports asynchronous rollback failures without replacing the initialization 
   vi.mocked(startBrowserSdk).mockReturnValueOnce({
     shutdown: vi.fn().mockRejectedValue(cleanupFailure),
   });
-  expect(() => useMicrosoftOpenTelemetry({ instrumentations: [instrumentation] })).toThrow(failure);
-  await vi.waitFor(() =>
-    expect(report).toHaveBeenCalledExactlyOnceWith(
-      "Instrumentation initialization cleanup failed",
-      cleanupFailure,
-    ),
+  await expect(useMicrosoftOpenTelemetry({ instrumentations: [instrumentation] })).rejects.toThrow(
+    failure,
+  );
+  expect(report).toHaveBeenCalledExactlyOnceWith(
+    "Telemetry initialization cleanup failed",
+    cleanupFailure,
   );
 });

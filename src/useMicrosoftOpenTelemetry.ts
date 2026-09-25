@@ -4,6 +4,8 @@
 import { diag, trace } from "@opentelemetry/api";
 import { logs } from "@opentelemetry/api-logs";
 import { startBrowserSdk } from "@opentelemetry/browser-sdk";
+import { SessionLogRecordProcessor, SessionSpanProcessor } from "./session/sessionProcessors.js";
+import { createSession } from "./session/createSession.js";
 import { PageViewInstrumentation } from "./instrumentation/pageView/index.js";
 import type {
   BrowserInstrumentation,
@@ -40,29 +42,40 @@ function createOwnedInstrumentations(
 }
 
 /**
- * Initializes traces and logs using Microsoft browser distribution options.
+ * Restores the session when enabled, then initializes traces, logs, and selected instrumentations.
+ * Await completion before emitting telemetry.
  * @public
  */
-export function useMicrosoftOpenTelemetry(
+export async function useMicrosoftOpenTelemetry(
   options: MicrosoftOpenTelemetryBrowserOptions = {},
-): MicrosoftOpenTelemetryBrowser {
-  const sdk = startBrowserSdk({
-    traces: { processors: options.spanProcessors },
-    logs: { processors: options.logRecordProcessors },
-  });
+): Promise<MicrosoftOpenTelemetryBrowser> {
+  const session = options.session?.enabled === true ? createSession() : undefined;
+  const spanProcessors = options.spanProcessors?.slice();
+  const logRecordProcessors = options.logRecordProcessors?.slice();
   // Distribution-owned instrumentations come last, so an application-supplied instance observing
   // the same API is installed first and is disabled last.
   const instrumentations = [
     ...(options.instrumentations ?? []),
     ...createOwnedInstrumentations(options),
   ];
-  if (instrumentations.length === 0) return sdk;
+  let sdk: MicrosoftOpenTelemetryBrowser | undefined;
+  let stopping = false;
+  // Upstream stale tracers can still call processors after provider shutdown.
+  const sessionProvider = {
+    getSessionId: () => (stopping ? null : (session?.getSessionId() ?? null)),
+  };
 
   let shutdownPromise: Promise<void> | undefined;
   function shutdown(): Promise<void> {
     return (shutdownPromise ??= (async () => {
+      stopping = true;
       const errors: unknown[] = [];
-      for (let i = instrumentations.length - 1; i >= 0; i--) {
+      try {
+        session?.shutdown();
+      } catch (error) {
+        errors.push(error);
+      }
+      for (let i = sdk ? instrumentations.length - 1 : -1; i >= 0; i--) {
         try {
           instrumentations[i].disable();
         } catch (error) {
@@ -70,7 +83,7 @@ export function useMicrosoftOpenTelemetry(
         }
       }
       try {
-        await sdk.shutdown();
+        await sdk?.shutdown();
       } catch (error) {
         errors.push(error);
       }
@@ -80,6 +93,24 @@ export function useMicrosoftOpenTelemetry(
   }
 
   try {
+    await session?.start();
+    sdk = startBrowserSdk({
+      traces: {
+        processors:
+          session && spanProcessors?.length !== 0
+            ? [new SessionSpanProcessor(sessionProvider), ...(spanProcessors ?? [])]
+            : spanProcessors,
+        // Supplying enrichment processors must not disable upstream default export.
+        ...(session && spanProcessors === undefined ? { exportConfig: {} } : {}),
+      },
+      logs: {
+        processors:
+          session && logRecordProcessors?.length !== 0
+            ? [new SessionLogRecordProcessor(sessionProvider), ...(logRecordProcessors ?? [])]
+            : logRecordProcessors,
+        ...(session && logRecordProcessors === undefined ? { exportConfig: {} } : {}),
+      },
+    });
     const tracerProvider = trace.getTracerProvider();
     const loggerProvider = logs.getLoggerProvider();
     for (const instrumentation of instrumentations) {
@@ -88,10 +119,11 @@ export function useMicrosoftOpenTelemetry(
       if (!instrumentation.getConfig().enabled) instrumentation.enable();
     }
   } catch (error) {
-    // Initialization stays synchronous; report asynchronous rollback failures through OTel.
-    void shutdown().catch((cleanupError: unknown) => {
-      diag.error("Instrumentation initialization cleanup failed", cleanupError);
-    });
+    try {
+      await shutdown();
+    } catch (cleanupError) {
+      diag.error("Telemetry initialization cleanup failed", cleanupError);
+    }
     throw error;
   }
 

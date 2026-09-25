@@ -1,9 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import type { TracerProvider } from "@opentelemetry/api";
+import type { ContextManager, TextMapPropagator, TracerProvider } from "@opentelemetry/api";
 import type { LoggerProvider } from "@opentelemetry/api-logs";
 import type { LogRecordProcessor } from "@opentelemetry/sdk-logs";
+import type { Resource } from "@opentelemetry/resources";
 import type { SpanProcessor } from "@opentelemetry/sdk-trace-base";
 import type { ConsoleInstrumentationConfig } from "@opentelemetry/browser-instrumentation/experimental/console";
 import type { ErrorsInstrumentationConfig } from "@opentelemetry/browser-instrumentation/experimental/errors";
@@ -87,10 +88,47 @@ export interface BrowserInstrumentation {
 }
 
 /**
+ * Advanced configuration for browser trace context and propagation.
+ *
+ * @remarks
+ * When omitted, the upstream browser SDK installs its default browser context manager and W3C
+ * Trace Context and Baggage propagators. Supplying either setting replaces that upstream default
+ * when the trace pipeline starts.
+ *
+ * The OpenTelemetry global context and propagation APIs are page-lifetime registrations. Like the
+ * tracer and logger providers, they are not unregistered by `shutdown`; initialize this
+ * distribution once per page.
+ *
+ * @public
+ */
+export interface MicrosoftOpenTelemetryBrowserTraceOptions {
+  /**
+   * Context manager used to track the active span across browser callbacks.
+   * Omit this setting to use the upstream browser SDK default when traces are initialized.
+   */
+  contextManager?: ContextManager;
+  /**
+   * Propagators combined for extraction and injection.
+   * Omit this setting for W3C Trace Context and Baggage; use an empty array to disable propagation.
+   */
+  propagators?: readonly TextMapPropagator[];
+}
+
+/**
  * Microsoft browser distribution configuration for traces and logs.
  * @public
  */
 export interface MicrosoftOpenTelemetryBrowserOptions {
+  /**
+   * Resource describing the entity producing telemetry.
+   *
+   * @remarks
+   * Build it with `resourceFromAttributes` or `detectResources` from `@opentelemetry/resources`.
+   * Merged over the SDK defaults, so `service.name` set here replaces the `unknown_service`
+   * placeholder. Resolved once at initialization, so only values fixed for the lifetime of the
+   * page belong here. Only its attributes are used; the schema URL is not carried through.
+   */
+  resource?: Resource;
   /**
    * Opt-in session tracking. Set enabled to true to persist sessions in localStorage and
    * supply missing session.id attributes on spans and logs. Uses a 30-minute inactivity
@@ -98,6 +136,8 @@ export interface MicrosoftOpenTelemetryBrowserOptions {
    * Omitted or disabled session tracking does not access session storage or start session timers.
    */
   session?: { enabled?: boolean };
+  /** Advanced trace context and propagation configuration. */
+  traces?: MicrosoftOpenTelemetryBrowserTraceOptions;
   /** Span processors to register with the tracer provider. An empty array skips trace initialization. */
   spanProcessors?: SpanProcessor[];
   /** Log record processors to register with the logger provider. An empty array skips log initialization. */

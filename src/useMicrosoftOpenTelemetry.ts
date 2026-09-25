@@ -7,6 +7,11 @@ import { startBrowserSdk } from "@opentelemetry/browser-sdk";
 import { SessionLogRecordProcessor, SessionSpanProcessor } from "./session/sessionProcessors.js";
 import { createSession } from "./session/createSession.js";
 import { PageViewInstrumentation } from "./instrumentation/pageView/index.js";
+import {
+  ATTR_TELEMETRY_DISTRO_NAME,
+  ATTR_TELEMETRY_DISTRO_VERSION,
+} from "@opentelemetry/semantic-conventions";
+import { OPENTELEMETRY_BROWSER_VERSION } from "./shared/constants.js";
 import type {
   BrowserInstrumentation,
   MicrosoftOpenTelemetryBrowser,
@@ -52,6 +57,7 @@ export async function useMicrosoftOpenTelemetry(
   const session = options.session?.enabled === true ? createSession() : undefined;
   const spanProcessors = options.spanProcessors?.slice();
   const logRecordProcessors = options.logRecordProcessors?.slice();
+  const traceOptions = options.traces;
   // Distribution-owned instrumentations come last, so an application-supplied instance observing
   // the same API is installed first and is disabled last.
   const instrumentations = [
@@ -95,7 +101,20 @@ export async function useMicrosoftOpenTelemetry(
   try {
     await session?.start();
     sdk = startBrowserSdk({
+      // Spread last: the caller's attributes win, and each call gets a fresh object because the
+      // SDK mutates this one in place and shares it between the traces and logs SDKs.
+      resourceAttributes: {
+        [ATTR_TELEMETRY_DISTRO_NAME]: "@microsoft/opentelemetry-distro-browser",
+        [ATTR_TELEMETRY_DISTRO_VERSION]: OPENTELEMETRY_BROWSER_VERSION,
+        ...options.resource?.attributes,
+      },
       traces: {
+        ...(traceOptions?.contextManager === undefined
+          ? {}
+          : { contextManager: traceOptions.contextManager }),
+        ...(traceOptions?.propagators === undefined
+          ? {}
+          : { propagators: traceOptions.propagators.slice() }),
         processors:
           session && spanProcessors?.length !== 0
             ? [new SessionSpanProcessor(sessionProvider), ...(spanProcessors ?? [])]

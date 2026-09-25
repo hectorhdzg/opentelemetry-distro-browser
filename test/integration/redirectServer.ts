@@ -46,6 +46,17 @@ export default async function setup(project: TestProject): Promise<() => Promise
       response.end(JSON.stringify({ redirectRequests, finalRequests }));
       return;
     }
+    if (request.method === "GET" && request.url === "/headers") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          baggage: request.headers.baggage,
+          custom: request.headers["x-test-context"],
+          traceparent: request.headers.traceparent,
+        }),
+      );
+      return;
+    }
     response.writeHead(404).end();
   });
   const redirectOrigin = await listen(redirectServer);
@@ -59,7 +70,10 @@ export default async function setup(project: TestProject): Promise<() => Promise
 function setCorsHeaders(response: ServerResponse): void {
   response.setHeader("access-control-allow-origin", "*");
   response.setHeader("access-control-allow-methods", "GET, POST, OPTIONS");
-  response.setHeader("access-control-allow-headers", "content-type, content-encoding");
+  response.setHeader(
+    "access-control-allow-headers",
+    "baggage, content-type, content-encoding, traceparent, tracestate, x-test-context",
+  );
 }
 
 function listen(server: Server): Promise<string> {

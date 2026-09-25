@@ -1,7 +1,14 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { ROOT_CONTEXT, context, diag, propagation, trace } from "@opentelemetry/api";
+import {
+  ROOT_CONTEXT,
+  context,
+  diag,
+  propagation,
+  trace,
+  type ContextManager,
+} from "@opentelemetry/api";
 import { logs, SeverityNumber } from "@opentelemetry/api-logs";
 import type { LogRecordProcessor } from "@opentelemetry/sdk-logs";
 import { startBrowserSdk } from "@opentelemetry/browser-sdk";
@@ -73,6 +80,49 @@ it("prepends session enrichment without changing the caller's processor arrays",
 
   await handle.shutdown();
   expect(upstreamHandle.shutdown).toHaveBeenCalledOnce();
+});
+
+it("forwards trace context configuration without sharing the propagator array", async () => {
+  const pipeline = createInMemoryPipeline();
+  const contextManager: ContextManager = {
+    active: () => ROOT_CONTEXT,
+    bind: (_ctx, target) => target,
+    disable() {
+      return this;
+    },
+    enable() {
+      return this;
+    },
+    with: (_ctx, callback, thisArg, ...args) => callback.apply(thisArg, args),
+  };
+  const propagator = {
+    fields: () => ["x-test-context"],
+    inject: vi.fn(),
+    extract: vi.fn((ctx) => ctx),
+  };
+  const propagators = Object.freeze([propagator]);
+  const options: MicrosoftOpenTelemetryBrowserOptions = {
+    spanProcessors: [pipeline.spanProcessor],
+    traces: Object.freeze({ contextManager, propagators }),
+  };
+  Object.freeze(options.spanProcessors);
+  const upstreamHandle = { shutdown: vi.fn(async () => {}) };
+  vi.mocked(startBrowserSdk).mockReturnValueOnce(upstreamHandle);
+
+  const handle = await useMicrosoftOpenTelemetry(Object.freeze(options));
+  handles.add(handle);
+
+  expect(startBrowserSdk).toHaveBeenCalledExactlyOnceWith({
+    traces: {
+      contextManager,
+      propagators: [propagator],
+      processors: [pipeline.spanProcessor],
+    },
+    logs: { processors: undefined },
+  });
+  const forwarded = vi.mocked(startBrowserSdk).mock.calls[0]?.[0]?.traces?.propagators;
+  expect(forwarded).not.toBe(propagators);
+  expect(options.traces?.propagators).toBe(propagators);
 });
 
 it("propagates initialization failures without returning a success-shaped handle", async () => {

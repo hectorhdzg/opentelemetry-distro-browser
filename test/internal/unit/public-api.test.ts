@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+import type { ContextManager, TextMapPropagator } from "@opentelemetry/api";
 import type { LogRecordProcessor } from "@opentelemetry/sdk-logs";
 import type { SpanProcessor } from "@opentelemetry/sdk-trace-base";
 import type { Instrumentation } from "@opentelemetry/instrumentation";
@@ -10,6 +11,7 @@ import {
   type BrowserInstrumentation,
   type MicrosoftOpenTelemetryBrowser,
   type MicrosoftOpenTelemetryBrowserOptions,
+  type MicrosoftOpenTelemetryBrowserTraceOptions,
   type PageViewInstrumentationConfig,
 } from "../../../src/index.js";
 
@@ -21,7 +23,21 @@ it("exposes distro-owned configuration and lifecycle contracts", () => {
     Promise<MicrosoftOpenTelemetryBrowser>
   >();
   expectTypeOf<keyof MicrosoftOpenTelemetryBrowserOptions>().toEqualTypeOf<
-    "spanProcessors" | "logRecordProcessors" | "instrumentations" | "pageView" | "session"
+    | "spanProcessors"
+    | "logRecordProcessors"
+    | "instrumentations"
+    | "pageView"
+    | "session"
+    | "traces"
+  >();
+  expectTypeOf<MicrosoftOpenTelemetryBrowserOptions["traces"]>().toEqualTypeOf<
+    MicrosoftOpenTelemetryBrowserTraceOptions | undefined
+  >();
+  expectTypeOf<MicrosoftOpenTelemetryBrowserTraceOptions["contextManager"]>().toEqualTypeOf<
+    ContextManager | undefined
+  >();
+  expectTypeOf<MicrosoftOpenTelemetryBrowserTraceOptions["propagators"]>().toEqualTypeOf<
+    readonly TextMapPropagator[] | undefined
   >();
   expectTypeOf<MicrosoftOpenTelemetryBrowserOptions["session"]>().toEqualTypeOf<
     { enabled?: boolean } | undefined

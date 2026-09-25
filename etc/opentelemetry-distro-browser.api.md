@@ -4,12 +4,14 @@
 
 ```ts
 
+import { ContextManager } from '@opentelemetry/api';
 import { DetectedResource } from '@opentelemetry/resources';
 import { LoggerProvider } from '@opentelemetry/api-logs';
 import { LogRecord } from '@opentelemetry/api-logs';
 import { LogRecordProcessor } from '@opentelemetry/sdk-logs';
 import { ResourceDetector } from '@opentelemetry/resources';
 import { SpanProcessor } from '@opentelemetry/sdk-trace-base';
+import { TextMapPropagator } from '@opentelemetry/api';
 import { TracerProvider } from '@opentelemetry/api';
 
 // @public
@@ -45,6 +47,13 @@ export interface MicrosoftOpenTelemetryBrowserOptions {
         enabled?: boolean;
     };
     spanProcessors?: SpanProcessor[];
+    traces?: MicrosoftOpenTelemetryBrowserTraceOptions;
+}
+
+// @public
+export interface MicrosoftOpenTelemetryBrowserTraceOptions {
+    contextManager?: ContextManager;
+    propagators?: readonly TextMapPropagator[];
 }
 
 // @public

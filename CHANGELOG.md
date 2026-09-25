@@ -11,3 +11,4 @@ All notable changes to this package are documented in this file.
 - Browser and user-agent resource detection.
 - Page-view instrumentation and default browser instrumentations.
 - Browser session management and Azure Monitor Breeze export support.
+- Runnable console and OTLP browser sample applications.

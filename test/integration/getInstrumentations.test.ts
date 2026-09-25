@@ -4,7 +4,7 @@
 import { context, diag, propagation, trace } from "@opentelemetry/api";
 import { logs } from "@opentelemetry/api-logs";
 import type { ReadableSpan } from "@opentelemetry/sdk-trace-base";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, inject, it } from "vitest";
 import { useMicrosoftOpenTelemetry } from "../../src/index.js";
 import { getInstrumentations } from "../../src/instrumentation/browserInstrumentation/index.js";
 import type { InstrumentationOptions, MicrosoftOpenTelemetryBrowser } from "../../src/types.js";
@@ -19,6 +19,12 @@ import { createInMemoryPipeline } from "../fixtures/telemetry.js";
 
 /** A path the dev server will answer, so a request completes rather than failing to connect. */
 const APPLICATION_URL = new URL("/__application__", location.origin).toString();
+const CROSS_ORIGIN_HEADERS_URL = new URL("/headers", inject("redirectEndpoint")).toString();
+
+interface PropagationHeaders {
+  baggage?: string;
+  traceparent?: string;
+}
 
 let pipeline: ReturnType<typeof createInMemoryPipeline>;
 let handle: MicrosoftOpenTelemetryBrowser | undefined;
@@ -47,6 +53,39 @@ function sendXhr(url: string): Promise<void> {
     xhr.open("GET", url);
     xhr.send();
   });
+}
+
+function sendXhrForHeaders(url: string): Promise<PropagationHeaders> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.addEventListener("load", () => {
+      try {
+        resolve(JSON.parse(xhr.responseText) as PropagationHeaders);
+      } catch (error) {
+        reject(error);
+      }
+    });
+    xhr.addEventListener("error", () => reject(new Error(`XMLHttpRequest failed for ${url}`)));
+    xhr.open("GET", url);
+    xhr.send();
+  });
+}
+
+async function fetchHeaders(url: string): Promise<PropagationHeaders> {
+  const response = await fetch(url);
+  return (await response.json()) as PropagationHeaders;
+}
+
+function withBaggage<T>(callback: () => T): T {
+  const baggage = propagation.createBaggage({
+    "tenant.id": { value: "contoso" },
+  });
+  return context.with(propagation.setBaggage(context.active(), baggage), callback);
+}
+
+function expectW3cHeaders(headers: PropagationHeaders): void {
+  expect(headers.traceparent).toMatch(/^00-[0-9a-f]{32}-[0-9a-f]{16}-01$/);
+  expect(headers.baggage).toBe("tenant.id=contoso");
 }
 
 /** Waits for the exporter to settle, then returns whatever was captured. */
@@ -115,6 +154,43 @@ describe("configured instrumentations in a browser", () => {
     const spans = await captured();
     expect(spans).toHaveLength(1);
     expect(urlsOf(spans)).toEqual([APPLICATION_URL]);
+  });
+
+  describe("W3C propagation", () => {
+    it("injects trace context and baggage into allowed cross-origin requests", async () => {
+      const allowedOrigins = [/^http:\/\/127\.0\.0\.1:\d+\//];
+      await start({
+        fetch: { propagateTraceHeaderCorsUrls: allowedOrigins },
+        xhr: { propagateTraceHeaderCorsUrls: allowedOrigins },
+      });
+
+      const [fetchRequest, xhrRequest] = await withBaggage(() =>
+        Promise.all([
+          fetchHeaders(CROSS_ORIGIN_HEADERS_URL),
+          sendXhrForHeaders(CROSS_ORIGIN_HEADERS_URL),
+        ]),
+      );
+
+      expectW3cHeaders(fetchRequest);
+      expectW3cHeaders(xhrRequest);
+    });
+
+    it("does not inject headers into cross-origin requests outside the allowed list", async () => {
+      await start({
+        fetch: { propagateTraceHeaderCorsUrls: ["https://allowed.example.test"] },
+        xhr: { propagateTraceHeaderCorsUrls: ["https://allowed.example.test"] },
+      });
+
+      const [fetchRequest, xhrRequest] = await withBaggage(() =>
+        Promise.all([
+          fetchHeaders(CROSS_ORIGIN_HEADERS_URL),
+          sendXhrForHeaders(CROSS_ORIGIN_HEADERS_URL),
+        ]),
+      );
+
+      expect(fetchRequest).toEqual({});
+      expect(xhrRequest).toEqual({});
+    });
   });
 
   describe("upstream settings reach the instrumentation", () => {

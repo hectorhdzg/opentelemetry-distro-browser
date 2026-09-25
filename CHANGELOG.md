@@ -7,8 +7,10 @@ All notable changes to this package are documented in this file.
 ### Added
 
 - Initial alpha release of the Microsoft OpenTelemetry distribution for browsers.
-- Browser SDK initialization for tracing and logging with configurable processors.
+- Browser SDK initialization for tracing and logging with configurable processors, resources,
+  context management, and propagation.
+- Azure Monitor span and log exporters with connection-string configuration and unload flushing.
 - Browser and user-agent resource detection.
 - Page-view instrumentation and default browser instrumentations.
-- Browser session management and Azure Monitor Breeze export support.
-- Runnable console and OTLP browser sample applications.
+- Browser session management.
+- Runnable Azure Monitor, console, and OTLP browser sample applications.

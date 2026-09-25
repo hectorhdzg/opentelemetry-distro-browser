@@ -19,5 +19,6 @@ export type {
   BrowserInstrumentation,
   MicrosoftOpenTelemetryBrowser,
   MicrosoftOpenTelemetryBrowserOptions,
+  MicrosoftOpenTelemetryBrowserTraceOptions,
 } from "./types.js";
 export { useMicrosoftOpenTelemetry } from "./useMicrosoftOpenTelemetry.js";

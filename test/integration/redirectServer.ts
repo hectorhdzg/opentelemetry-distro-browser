@@ -51,6 +51,7 @@ export default async function setup(project: TestProject): Promise<() => Promise
       response.end(
         JSON.stringify({
           baggage: request.headers.baggage,
+          custom: request.headers["x-test-context"],
           traceparent: request.headers.traceparent,
         }),
       );
@@ -71,7 +72,7 @@ function setCorsHeaders(response: ServerResponse): void {
   response.setHeader("access-control-allow-methods", "GET, POST, OPTIONS");
   response.setHeader(
     "access-control-allow-headers",
-    "baggage, content-type, content-encoding, traceparent, tracestate",
+    "baggage, content-type, content-encoding, traceparent, tracestate, x-test-context",
   );
 }
 

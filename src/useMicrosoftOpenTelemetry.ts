@@ -52,6 +52,7 @@ export async function useMicrosoftOpenTelemetry(
   const session = options.session?.enabled === true ? createSession() : undefined;
   const spanProcessors = options.spanProcessors?.slice();
   const logRecordProcessors = options.logRecordProcessors?.slice();
+  const traceOptions = options.traces;
   // Distribution-owned instrumentations come last, so an application-supplied instance observing
   // the same API is installed first and is disabled last.
   const instrumentations = [
@@ -96,6 +97,12 @@ export async function useMicrosoftOpenTelemetry(
     await session?.start();
     sdk = startBrowserSdk({
       traces: {
+        ...(traceOptions?.contextManager === undefined
+          ? {}
+          : { contextManager: traceOptions.contextManager }),
+        ...(traceOptions?.propagators === undefined
+          ? {}
+          : { propagators: traceOptions.propagators.slice() }),
         processors:
           session && spanProcessors?.length !== 0
             ? [new SessionSpanProcessor(sessionProvider), ...(spanProcessors ?? [])]

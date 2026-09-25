@@ -1,13 +1,17 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { context, diag, propagation, trace } from "@opentelemetry/api";
+import { context, diag, propagation, trace, type TextMapPropagator } from "@opentelemetry/api";
 import { logs } from "@opentelemetry/api-logs";
 import type { ReadableSpan } from "@opentelemetry/sdk-trace-base";
 import { afterEach, describe, expect, inject, it } from "vitest";
 import { useMicrosoftOpenTelemetry } from "../../src/index.js";
 import { getInstrumentations } from "../../src/instrumentation/browserInstrumentation/index.js";
-import type { InstrumentationOptions, MicrosoftOpenTelemetryBrowser } from "../../src/types.js";
+import type {
+  InstrumentationOptions,
+  MicrosoftOpenTelemetryBrowser,
+  MicrosoftOpenTelemetryBrowserTraceOptions,
+} from "../../src/types.js";
 import { createInMemoryPipeline } from "../fixtures/telemetry.js";
 
 /**
@@ -23,16 +27,21 @@ const CROSS_ORIGIN_HEADERS_URL = new URL("/headers", inject("redirectEndpoint"))
 
 interface PropagationHeaders {
   baggage?: string;
+  custom?: string;
   traceparent?: string;
 }
 
 let pipeline: ReturnType<typeof createInMemoryPipeline>;
 let handle: MicrosoftOpenTelemetryBrowser | undefined;
 
-async function start(options: InstrumentationOptions = {}): Promise<void> {
+async function start(
+  options: InstrumentationOptions = {},
+  traces?: MicrosoftOpenTelemetryBrowserTraceOptions,
+): Promise<void> {
   pipeline = createInMemoryPipeline();
   handle = await useMicrosoftOpenTelemetry({
     ...pipeline.options,
+    traces,
     instrumentations: await getInstrumentations(options),
   });
 }
@@ -180,6 +189,51 @@ describe("configured instrumentations in a browser", () => {
         fetch: { propagateTraceHeaderCorsUrls: ["https://allowed.example.test"] },
         xhr: { propagateTraceHeaderCorsUrls: ["https://allowed.example.test"] },
       });
+
+      const [fetchRequest, xhrRequest] = await withBaggage(() =>
+        Promise.all([
+          fetchHeaders(CROSS_ORIGIN_HEADERS_URL),
+          sendXhrForHeaders(CROSS_ORIGIN_HEADERS_URL),
+        ]),
+      );
+
+      expect(fetchRequest).toEqual({});
+      expect(xhrRequest).toEqual({});
+    });
+
+    it("replaces the defaults with configured propagators", async () => {
+      const customPropagator: TextMapPropagator = {
+        fields: () => ["x-test-context"],
+        inject: (_ctx, carrier, setter) => setter.set(carrier, "x-test-context", "configured"),
+        extract: (ctx) => ctx,
+      };
+      const allowedOrigins = [/^http:\/\/127\.0\.0\.1:\d+\//];
+      await start(
+        {
+          fetch: { propagateTraceHeaderCorsUrls: allowedOrigins },
+          xhr: { propagateTraceHeaderCorsUrls: allowedOrigins },
+        },
+        { propagators: [customPropagator] },
+      );
+
+      const [fetchRequest, xhrRequest] = await Promise.all([
+        fetchHeaders(CROSS_ORIGIN_HEADERS_URL),
+        sendXhrForHeaders(CROSS_ORIGIN_HEADERS_URL),
+      ]);
+
+      expect(fetchRequest).toEqual({ custom: "configured" });
+      expect(xhrRequest).toEqual({ custom: "configured" });
+    });
+
+    it("disables propagation when configured with an empty propagator list", async () => {
+      const allowedOrigins = [/^http:\/\/127\.0\.0\.1:\d+\//];
+      await start(
+        {
+          fetch: { propagateTraceHeaderCorsUrls: allowedOrigins },
+          xhr: { propagateTraceHeaderCorsUrls: allowedOrigins },
+        },
+        { propagators: [] },
+      );
 
       const [fetchRequest, xhrRequest] = await withBaggage(() =>
         Promise.all([

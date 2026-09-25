@@ -14,9 +14,11 @@ import type { LogRecordProcessor } from "@opentelemetry/sdk-logs";
 import { startBrowserSdk } from "@opentelemetry/browser-sdk";
 import { OTLPLogExporter } from "@opentelemetry/exporter-logs-otlp-http";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
+import { resourceFromAttributes } from "@opentelemetry/resources";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import {
   browserDetector,
+  OPENTELEMETRY_BROWSER_VERSION,
   userAgentDetector,
   useMicrosoftOpenTelemetry,
   type MicrosoftOpenTelemetryBrowser,
@@ -62,6 +64,10 @@ it("prepends session enrichment without changing the caller's processor arrays",
   handles.add(handle);
   expect(useMicrosoftOpenTelemetry).not.toBe(startBrowserSdk);
   expect(startBrowserSdk).toHaveBeenCalledExactlyOnceWith({
+    resourceAttributes: {
+      "telemetry.distro.name": "@microsoft/opentelemetry-distro-browser",
+      "telemetry.distro.version": OPENTELEMETRY_BROWSER_VERSION,
+    },
     traces: {
       processors: [
         expect.objectContaining({ onStart: expect.any(Function) }),
@@ -113,6 +119,10 @@ it("forwards trace context configuration without sharing the propagator array", 
   handles.add(handle);
 
   expect(startBrowserSdk).toHaveBeenCalledExactlyOnceWith({
+    resourceAttributes: {
+      "telemetry.distro.name": "@microsoft/opentelemetry-distro-browser",
+      "telemetry.distro.version": OPENTELEMETRY_BROWSER_VERSION,
+    },
     traces: {
       contextManager,
       propagators: [propagator],
@@ -123,6 +133,59 @@ it("forwards trace context configuration without sharing the propagator array", 
   const forwarded = vi.mocked(startBrowserSdk).mock.calls[0]?.[0]?.traces?.propagators;
   expect(forwarded).not.toBe(propagators);
   expect(options.traces?.propagators).toBe(propagators);
+});
+
+it("identifies the distribution without displacing the upstream SDK defaults", async () => {
+  const pipeline = createInMemoryPipeline();
+  const spanExport = vi.spyOn(pipeline.spanExporter, "export");
+  const handle = await useMicrosoftOpenTelemetry(pipeline.options);
+  handles.add(handle);
+  trace.getTracer("manual").startSpan("checkout").end();
+  await handle.shutdown();
+  handles.delete(handle);
+
+  expect(spanExport.mock.calls[0][0][0].resource.attributes).toMatchObject({
+    "telemetry.distro.name": "@microsoft/opentelemetry-distro-browser",
+    "telemetry.distro.version": OPENTELEMETRY_BROWSER_VERSION,
+    "service.name": "unknown_service",
+    "telemetry.sdk.language": "webjs",
+    "telemetry.sdk.name": "opentelemetry",
+  });
+});
+
+it("lets a service.name attribute replace the unknown_service placeholder", async () => {
+  const pipeline = createInMemoryPipeline();
+  const spanExport = vi.spyOn(pipeline.spanExporter, "export");
+  const handle = await useMicrosoftOpenTelemetry({
+    ...pipeline.options,
+    resource: resourceFromAttributes({
+      "service.name": "checkout-web",
+      "service.version": "4.2.1",
+      "deployment.environment.name": "production",
+    }),
+  });
+  handles.add(handle);
+  trace.getTracer("manual").startSpan("checkout").end();
+  await handle.shutdown();
+  handles.delete(handle);
+
+  expect(spanExport.mock.calls[0][0][0].resource.attributes).toMatchObject({
+    "service.name": "checkout-web",
+    "service.version": "4.2.1",
+    "deployment.environment.name": "production",
+  });
+});
+
+it("does not share one attributes object across initializations", async () => {
+  vi.mocked(startBrowserSdk)
+    .mockReturnValueOnce({ shutdown: vi.fn(async () => {}) })
+    .mockReturnValueOnce({ shutdown: vi.fn(async () => {}) });
+
+  await useMicrosoftOpenTelemetry();
+  await useMicrosoftOpenTelemetry();
+
+  const [first, second] = vi.mocked(startBrowserSdk).mock.calls;
+  expect(first[0]?.resourceAttributes).not.toBe(second[0]?.resourceAttributes);
 });
 
 it("propagates initialization failures without returning a success-shaped handle", async () => {

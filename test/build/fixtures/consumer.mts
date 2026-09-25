@@ -8,6 +8,7 @@ import {
 import { OTLPLogExporter } from "@opentelemetry/exporter-logs-otlp-http";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
 import { BatchLogRecordProcessor } from "@opentelemetry/sdk-logs";
+import { resourceFromAttributes } from "@opentelemetry/resources";
 import { BatchSpanProcessor } from "@opentelemetry/sdk-trace-base";
 
 export const version: string = OPENTELEMETRY_BROWSER_VERSION;
@@ -28,6 +29,12 @@ export const instrumentation: BrowserInstrumentation = {
 export const options: MicrosoftOpenTelemetryBrowserOptions = {
   session: { enabled: true },
   instrumentations: Object.freeze([instrumentation]),
+  resource: resourceFromAttributes({
+    "service.name": "consumer",
+    "service.version": "1.0.0",
+    "deployment.environment.name": "production",
+    "custom.tenant.id": "consumer",
+  }),
   spanProcessors: [
     new BatchSpanProcessor(
       new OTLPTraceExporter({ url: "https://example.test/v1/traces", headers }),
@@ -44,7 +51,7 @@ export const initialize: (
 ) => Promise<MicrosoftOpenTelemetryBrowser> = useMicrosoftOpenTelemetry;
 // @ts-expect-error The previous distribution-specific option is no longer supported.
 useMicrosoftOpenTelemetry({ samplingRatio: 1 });
-// @ts-expect-error Service/resource configuration is not part of the supported options yet.
+// @ts-expect-error Service configuration goes through the resource option, not serviceName.
 useMicrosoftOpenTelemetry({ serviceName: "consumer" });
 // @ts-expect-error Upstream SDK controls are not exposed by the distro.
 useMicrosoftOpenTelemetry({ disabled: true });

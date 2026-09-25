@@ -3,6 +3,7 @@
 
 import type { ContextManager, TextMapPropagator } from "@opentelemetry/api";
 import type { LogRecordProcessor } from "@opentelemetry/sdk-logs";
+import type { Resource } from "@opentelemetry/resources";
 import type { SpanProcessor } from "@opentelemetry/sdk-trace-base";
 import type { Instrumentation } from "@opentelemetry/instrumentation";
 import { expectTypeOf, it } from "vitest";
@@ -23,12 +24,16 @@ it("exposes distro-owned configuration and lifecycle contracts", () => {
     Promise<MicrosoftOpenTelemetryBrowser>
   >();
   expectTypeOf<keyof MicrosoftOpenTelemetryBrowserOptions>().toEqualTypeOf<
+    | "resource"
     | "spanProcessors"
     | "logRecordProcessors"
     | "instrumentations"
     | "pageView"
     | "session"
     | "traces"
+  >();
+  expectTypeOf<MicrosoftOpenTelemetryBrowserOptions["resource"]>().toEqualTypeOf<
+    Resource | undefined
   >();
   expectTypeOf<MicrosoftOpenTelemetryBrowserOptions["traces"]>().toEqualTypeOf<
     MicrosoftOpenTelemetryBrowserTraceOptions | undefined

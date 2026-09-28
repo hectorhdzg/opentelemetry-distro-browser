@@ -22,15 +22,16 @@ uses them.
 
 ## Azure Monitor configuration
 
-Copy `.env.example` to `.env.local`, set `VITE_APPLICATIONINSIGHTS_CONNECTION_STRING` to the
-connection string from an Application Insights resource, and run `npm run dev:azure-monitor`.
-Application Insights connection strings do not grant read access to the resource, but they are
-included in public browser JavaScript and should still be treated as application configuration.
+Copy `azure-monitor/.env.example` to `azure-monitor/.env.local`, set
+`VITE_APPLICATIONINSIGHTS_CONNECTION_STRING` to the connection string from an Application Insights
+resource, and run `npm run dev:azure-monitor`. Application Insights connection strings do not grant
+read access to the resource, but they are included in public browser JavaScript and should still be
+treated as application configuration.
 
 ## OTLP configuration
 
-Copy `.env.example` to `.env.local`, set `VITE_OTLP_ENDPOINT` to the collector's OTLP/HTTP base
-URL, and run `npm run dev:otlp`. The sample appends `/v1/traces` and `/v1/logs`.
+Copy `otlp/.env.example` to `otlp/.env.local`, set `VITE_OTLP_ENDPOINT` to the collector's
+OTLP/HTTP base URL, and run `npm run dev:otlp`. The sample appends `/v1/traces` and `/v1/logs`.
 
 The collector must allow the sample origin through CORS. `VITE_` values are public browser
 configuration; never put API keys, bearer tokens, or other secrets in them. Use a collector or

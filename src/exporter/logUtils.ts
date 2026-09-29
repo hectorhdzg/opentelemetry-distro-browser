@@ -72,17 +72,16 @@ function parseStack(stack: string): readonly StackFrame[] | undefined {
     const startsWithAt = trimmed.startsWith("at ");
     const atSign = trimmed.indexOf("@");
     const scheme = trimmed.indexOf("://");
-    const hasMethodAtLocation = atSign > 0 && (scheme < 0 || atSign < scheme);
+    const hasAtLocation = atSign >= 0 && (scheme < 0 || atSign < scheme);
     const isBareUrlLocation = scheme > 0 && !trimmed.slice(0, scheme).includes(" ");
-    if (!startsWithAt && !hasMethodAtLocation && !isBareUrlLocation) continue;
+    if (!startsWithAt && !hasAtLocation && !isBareUrlLocation) continue;
 
     const location = /:(\d+):\d+\)?$/.exec(trimmed) ?? /:(\d+)\)?$/.exec(trimmed);
     if (!location) continue;
 
     const prefix = trimmed.slice(0, location.index);
     const openParenthesis = prefix.indexOf(" (");
-    const separator =
-      openParenthesis >= 0 ? openParenthesis + 1 : hasMethodAtLocation ? atSign : -1;
+    const separator = openParenthesis >= 0 ? openParenthesis + 1 : hasAtLocation ? atSign : -1;
     const method =
       separator < 0
         ? "<no_method>"

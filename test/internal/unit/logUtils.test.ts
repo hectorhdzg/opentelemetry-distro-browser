@@ -97,7 +97,8 @@ describe("Azure Monitor log envelope mapping", () => {
     const stack =
       "Request failed:404\n" +
       "    at render (https://example.test/app(foo).js:42:7)\n" +
-      "https://example.test/bootstrap.js:8:3";
+      "https://example.test/bootstrap.js:8:3\n" +
+      "@https://example.test/anonymous.js:12:4";
     const envelope = logToEnvelope(
       makeLog({
         eventName: "exception",
@@ -124,6 +125,13 @@ describe("Azure Monitor log envelope mapping", () => {
         assembly: "https://example.test/bootstrap.js:8:3",
         fileName: "https://example.test/bootstrap.js",
         line: 8,
+      },
+      {
+        level: 2,
+        method: "<no_method>",
+        assembly: "@https://example.test/anonymous.js:12:4",
+        fileName: "https://example.test/anonymous.js",
+        line: 12,
       },
     ]);
   });

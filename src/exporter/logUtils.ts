@@ -3,9 +3,12 @@
 
 import type { Attributes } from "@opentelemetry/api";
 import type { ReadableLogRecord } from "@opentelemetry/sdk-logs";
+import { generatePageViewId } from "../instrumentation/pageView/pageViewContext.js";
 import {
   ATTR_PAGE_VIEW_DURATION,
+  ATTR_PAGE_VIEW_ID,
   ATTR_PAGE_VIEW_NAME,
+  ATTR_PAGE_VIEW_REFERRER,
   EVENT_BROWSER_PAGE_VIEW,
 } from "../instrumentation/pageView/semconv.js";
 import {
@@ -46,7 +49,9 @@ const promotedPageViewAttributes = /* @__PURE__ */ new Set([
   EXCEPTION_TYPE,
   NAVIGATION_DURATION,
   ATTR_PAGE_VIEW_DURATION,
+  ATTR_PAGE_VIEW_ID,
   ATTR_PAGE_VIEW_NAME,
+  ATTR_PAGE_VIEW_REFERRER,
   URL_FULL,
 ]);
 const MAX_PARSED_STACK_SIZE_IN_BYTES = 32 * 1024;
@@ -176,10 +181,13 @@ export function logToEnvelope(
   } else if (isPageView(logRecord.eventName)) {
     const duration =
       logRecord.attributes[ATTR_PAGE_VIEW_DURATION] ?? logRecord.attributes[NAVIGATION_DURATION];
+    const pageViewId = logRecord.attributes[ATTR_PAGE_VIEW_ID];
+    const referrer = logRecord.attributes[ATTR_PAGE_VIEW_REFERRER];
     name = "Microsoft.ApplicationInsights.PageView";
     baseType = "PageViewData";
     baseData = {
       ver: 2,
+      id: pageViewId === undefined ? generatePageViewId() : serializeAttribute(pageViewId),
       name: serializeAttribute(
         logRecord.body ??
           logRecord.attributes[ATTR_PAGE_VIEW_NAME] ??
@@ -191,6 +199,7 @@ export function logToEnvelope(
           ? undefined
           : serializeAttribute(logRecord.attributes[URL_FULL]),
       duration: typeof duration === "number" ? millisecondsToTimeSpan(duration) : undefined,
+      ...(referrer === undefined ? {} : { referredUri: serializeAttribute(referrer) }),
       ...customFields,
     };
   } else if (

@@ -38,7 +38,10 @@ describe("Azure Monitor log envelope mapping", () => {
         attributes: {
           "exception.type": "TypeError",
           "exception.message": "Cannot read properties of undefined",
-          "exception.stacktrace": "TypeError: Cannot read properties of undefined\n  at checkout",
+          "exception.stacktrace":
+            "TypeError: Cannot read properties of undefined\n" +
+            "    at checkout (https://shop.example.test/app.js:42:7)\n" +
+            "restoreCart@https://shop.example.test/cart.js:18:3",
           "url.full": "https://shop.example.test/checkout",
           handled: false,
         },
@@ -57,7 +60,26 @@ describe("Azure Monitor log envelope mapping", () => {
             typeName: "TypeError",
             message: "Cannot read properties of undefined",
             hasFullStack: true,
-            stack: "TypeError: Cannot read properties of undefined\n  at checkout",
+            stack:
+              "TypeError: Cannot read properties of undefined\n" +
+              "    at checkout (https://shop.example.test/app.js:42:7)\n" +
+              "restoreCart@https://shop.example.test/cart.js:18:3",
+            parsedStack: [
+              {
+                level: 0,
+                method: "checkout",
+                assembly: "at checkout (https://shop.example.test/app.js:42:7)",
+                fileName: "https://shop.example.test/app.js",
+                line: 42,
+              },
+              {
+                level: 1,
+                method: "restoreCart",
+                assembly: "restoreCart@https://shop.example.test/cart.js:18:3",
+                fileName: "https://shop.example.test/cart.js",
+                line: 18,
+              },
+            ],
           },
         ],
         severityLevel: 3,

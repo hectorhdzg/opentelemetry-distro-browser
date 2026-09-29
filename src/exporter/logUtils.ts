@@ -31,6 +31,7 @@ import type {
   MessageData,
   PageViewData,
   SeverityLevel,
+  StackFrame,
 } from "./telemetryModels.js";
 
 const promotedLogAttributes = /* @__PURE__ */ new Set([
@@ -62,6 +63,44 @@ function mapSeverity(severityNumber: number | undefined): SeverityLevel | undefi
   return 4;
 }
 
+function parseStack(stack: string): readonly StackFrame[] | undefined {
+  const frames: StackFrame[] = [];
+
+  for (const assembly of stack.split("\n")) {
+    const trimmed = assembly.trim();
+    const location = /:(\d+):\d+\)?$/.exec(trimmed) ?? /:(\d+)\)?$/.exec(trimmed);
+    if (!location) continue;
+
+    const prefix = trimmed.slice(0, location.index);
+    const openParenthesis = prefix.lastIndexOf("(");
+    const atSign = prefix.indexOf("@");
+    const scheme = prefix.indexOf("://");
+    const separator =
+      openParenthesis >= 0 ? openParenthesis : atSign >= 0 && atSign < scheme ? atSign : -1;
+    const method =
+      separator < 0
+        ? "<no_method>"
+        : prefix
+            .slice(0, separator)
+            .replace(/^\s*at\s+/, "")
+            .trim() || "<no_method>";
+    const fileName = (separator < 0 ? prefix : prefix.slice(separator + 1))
+      .replace(/^\s*at\s+/, "")
+      .trim();
+    if (!fileName) continue;
+
+    frames.push({
+      level: frames.length,
+      method,
+      assembly: trimmed,
+      fileName,
+      line: Number(location[1]),
+    });
+  }
+
+  return frames.length === 0 ? undefined : frames;
+}
+
 export function logToEnvelope(
   logRecord: ReadableLogRecord,
   instrumentationKey: string,
@@ -82,6 +121,7 @@ export function logToEnvelope(
 
   if (logRecord.eventName === "exception" || logRecord.attributes[EXCEPTION_TYPE]) {
     const stack = logRecord.attributes[EXCEPTION_STACKTRACE];
+    const serializedStack = stack === undefined ? undefined : serializeAttribute(stack);
     name = "Microsoft.ApplicationInsights.Exception";
     baseType = "ExceptionData";
     baseData = {
@@ -93,7 +133,8 @@ export function logToEnvelope(
             logRecord.attributes[EXCEPTION_MESSAGE] ?? logRecord.body ?? "Exception",
           ),
           hasFullStack: Boolean(stack),
-          stack: stack === undefined ? undefined : serializeAttribute(stack),
+          stack: serializedStack,
+          parsedStack: serializedStack === undefined ? undefined : parseStack(serializedStack),
         },
       ],
       severityLevel,

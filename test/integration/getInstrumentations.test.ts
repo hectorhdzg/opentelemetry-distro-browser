@@ -10,6 +10,7 @@ import {
   type TextMapPropagator,
 } from "@opentelemetry/api";
 import { logs } from "@opentelemetry/api-logs";
+import type { ReadableLogRecord } from "@opentelemetry/sdk-logs";
 import type { ReadableSpan } from "@opentelemetry/sdk-trace-base";
 import { afterEach, describe, expect, inject, it } from "vitest";
 import { useMicrosoftOpenTelemetry } from "../../src/index.js";
@@ -112,6 +113,12 @@ async function captured(): Promise<ReadableSpan[]> {
   return pipeline.spanExporter.getFinishedSpans();
 }
 
+async function capturedLogs(): Promise<ReadableLogRecord[]> {
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  await pipeline.logProcessor.forceFlush();
+  return pipeline.logExporter.getFinishedLogRecords();
+}
+
 function urlsOf(spans: readonly ReadableSpan[]): string[] {
   return spans.map((span) => String(span.attributes["url.full"] ?? span.attributes["http.url"]));
 }
@@ -171,6 +178,50 @@ describe("configured instrumentations in a browser", () => {
     const spans = await captured();
     expect(spans).toHaveLength(1);
     expect(urlsOf(spans)).toEqual([APPLICATION_URL]);
+  });
+
+  it("captures browser errors, unhandled rejections and cross-origin error messages", async () => {
+    await start({
+      fetch: { enabled: false },
+      xhr: { enabled: false },
+      errors: {
+        enabled: true,
+        applyCustomAttributes: (error) => ({
+          "test.error_kind": typeof error === "string" ? "message" : error.name,
+        }),
+      },
+    });
+
+    const thrown = new TypeError("checkout failed");
+    thrown.stack = "TypeError: checkout failed\n    at checkout (https://shop.test/app.js:42:7)";
+    window.dispatchEvent(new ErrorEvent("error", { error: thrown, message: thrown.message }));
+
+    const rejected = new Error("payment rejected");
+    rejected.stack = "Error: payment rejected\n    at submitPayment (https://shop.test/pay.js:8:3)";
+    const rejection = new Event("unhandledrejection");
+    Object.defineProperty(rejection, "reason", { value: rejected });
+    window.dispatchEvent(rejection);
+
+    window.dispatchEvent(new ErrorEvent("error", { message: "Script error." }));
+
+    const records = (await capturedLogs()).filter((record) => record.eventName === "exception");
+    expect(records).toHaveLength(3);
+    expect(records[0]?.attributes).toMatchObject({
+      "exception.type": "TypeError",
+      "exception.message": "checkout failed",
+      "exception.stacktrace": thrown.stack,
+      "test.error_kind": "TypeError",
+    });
+    expect(records[1]?.attributes).toMatchObject({
+      "exception.type": "Error",
+      "exception.message": "payment rejected",
+      "exception.stacktrace": rejected.stack,
+      "test.error_kind": "Error",
+    });
+    expect(records[2]?.attributes).toMatchObject({
+      "exception.message": "Script error.",
+      "test.error_kind": "message",
+    });
   });
 
   describe("W3C propagation", () => {

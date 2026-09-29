@@ -4,6 +4,11 @@ All notable changes to this package are documented in this file.
 
 ## Unreleased
 
+### Added
+
+- Added parsed JavaScript stack frames to Azure Monitor browser exception telemetry while
+  preserving the original stack trace.
+
 ### Changed
 
 - Replaced proposal-era README content with installation, initialization, configuration,

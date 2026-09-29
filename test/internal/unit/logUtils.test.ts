@@ -5,6 +5,7 @@ import type { SpanContext } from "@opentelemetry/api";
 import type { ReadableLogRecord } from "@opentelemetry/sdk-logs";
 import { describe, expect, it } from "vitest";
 import { logToEnvelope } from "../../../src/exporter/logUtils.js";
+import type { ExceptionData } from "../../../src/exporter/telemetryModels.js";
 import { OPENTELEMETRY_BROWSER_VERSION } from "../../../src/shared/constants.js";
 
 const instrumentationKey = "00000000-0000-0000-0000-000000000000";
@@ -90,6 +91,68 @@ describe("Azure Monitor log envelope mapping", () => {
         measurements: undefined,
       },
     });
+  });
+
+  it("parses only stack frames and supports parentheses in filenames", () => {
+    const stack =
+      "Request failed:404\n" +
+      "    at render (https://example.test/app(foo).js:42:7)\n" +
+      "https://example.test/bootstrap.js:8:3";
+    const envelope = logToEnvelope(
+      makeLog({
+        eventName: "exception",
+        attributes: {
+          "exception.message": "Request failed:404",
+          "exception.stacktrace": stack,
+        },
+      }),
+      instrumentationKey,
+    );
+    const exception = (envelope.data.baseData as ExceptionData).exceptions[0];
+
+    expect(exception.parsedStack).toEqual([
+      {
+        level: 0,
+        method: "render",
+        assembly: "at render (https://example.test/app(foo).js:42:7)",
+        fileName: "https://example.test/app(foo).js",
+        line: 42,
+      },
+      {
+        level: 1,
+        method: "<no_method>",
+        assembly: "https://example.test/bootstrap.js:8:3",
+        fileName: "https://example.test/bootstrap.js",
+        line: 8,
+      },
+    ]);
+  });
+
+  it("caps parsed stack frames at 32 KB while preserving both ends", () => {
+    const stack = Array.from(
+      { length: 500 },
+      (_, index) =>
+        `    at frame${index} (https://example.test/${"segment/".repeat(12)}file${index}.js:${index + 1}:1)`,
+    ).join("\n");
+    const envelope = logToEnvelope(
+      makeLog({
+        eventName: "exception",
+        attributes: {
+          "exception.message": "Large stack",
+          "exception.stacktrace": stack,
+        },
+      }),
+      instrumentationKey,
+    );
+    const parsedStack = (envelope.data.baseData as ExceptionData).exceptions[0]?.parsedStack;
+    if (!parsedStack) throw new Error("Expected parsed stack frames");
+
+    expect(new TextEncoder().encode(JSON.stringify(parsedStack)).byteLength).toBeLessThanOrEqual(
+      32 * 1024,
+    );
+    expect(parsedStack[0]?.assembly).toContain("frame0");
+    expect(parsedStack.at(-1)?.assembly).toContain("frame499");
+    expect(parsedStack.length).toBeLessThan(500);
   });
 
   it("maps an unnamed log to MessageData", () => {

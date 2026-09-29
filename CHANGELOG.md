@@ -7,9 +7,6 @@ All notable changes to this package are documented in this file.
 ### Added
 
 - Promote the size harness into a repository tool
-
-### Added
-
 - Added parsed JavaScript stack frames to Azure Monitor browser exception telemetry while
   preserving the original stack trace.
 

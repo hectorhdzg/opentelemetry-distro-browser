@@ -49,6 +49,7 @@ const promotedPageViewAttributes = /* @__PURE__ */ new Set([
   ATTR_PAGE_VIEW_NAME,
   URL_FULL,
 ]);
+const MAX_PARSED_STACK_SIZE_IN_BYTES = 32 * 1024;
 
 function isPageView(eventName: string | undefined): boolean {
   return eventName === EVENT_BROWSER_PAGE_VIEW || eventName === NAVIGATION_EVENT_NAME;
@@ -68,15 +69,20 @@ function parseStack(stack: string): readonly StackFrame[] | undefined {
 
   for (const assembly of stack.split("\n")) {
     const trimmed = assembly.trim();
+    const startsWithAt = trimmed.startsWith("at ");
+    const atSign = trimmed.indexOf("@");
+    const scheme = trimmed.indexOf("://");
+    const hasMethodAtLocation = atSign > 0 && (scheme < 0 || atSign < scheme);
+    const isBareUrlLocation = scheme > 0 && !trimmed.slice(0, scheme).includes(" ");
+    if (!startsWithAt && !hasMethodAtLocation && !isBareUrlLocation) continue;
+
     const location = /:(\d+):\d+\)?$/.exec(trimmed) ?? /:(\d+)\)?$/.exec(trimmed);
     if (!location) continue;
 
     const prefix = trimmed.slice(0, location.index);
-    const openParenthesis = prefix.lastIndexOf("(");
-    const atSign = prefix.indexOf("@");
-    const scheme = prefix.indexOf("://");
+    const openParenthesis = prefix.indexOf(" (");
     const separator =
-      openParenthesis >= 0 ? openParenthesis : atSign >= 0 && atSign < scheme ? atSign : -1;
+      openParenthesis >= 0 ? openParenthesis + 1 : hasMethodAtLocation ? atSign : -1;
     const method =
       separator < 0
         ? "<no_method>"
@@ -98,7 +104,35 @@ function parseStack(stack: string): readonly StackFrame[] | undefined {
     });
   }
 
-  return frames.length === 0 ? undefined : frames;
+  if (frames.length === 0) return undefined;
+
+  const encoder = new TextEncoder();
+  const sizes = frames.map((frame) => encoder.encode(JSON.stringify(frame)).byteLength);
+  const serializedSize = 2 + sizes.reduce((sum, size) => sum + size, 0) + frames.length - 1;
+  if (serializedSize <= MAX_PARSED_STACK_SIZE_IN_BYTES) return frames;
+
+  const first: StackFrame[] = [];
+  const last: StackFrame[] = [];
+  let selectedSize = 2;
+  let left = 0;
+  let right = frames.length - 1;
+  while (left <= right) {
+    const isPair = left !== right;
+    const addedSize =
+      sizes[left] +
+      (isPair ? sizes[right] : 0) +
+      (first.length + last.length === 0 ? 0 : 1) +
+      (isPair ? 1 : 0);
+    if (selectedSize + addedSize > MAX_PARSED_STACK_SIZE_IN_BYTES) break;
+    first.push(frames[left]);
+    if (isPair) last.push(frames[right]);
+    selectedSize += addedSize;
+    left++;
+    right--;
+  }
+
+  const capped = [...first, ...last.reverse()];
+  return capped.length === 0 ? undefined : capped;
 }
 
 export function logToEnvelope(

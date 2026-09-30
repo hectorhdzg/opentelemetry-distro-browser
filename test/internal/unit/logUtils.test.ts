@@ -224,6 +224,7 @@ describe("Azure Monitor log envelope mapping", () => {
     expect(new TextEncoder().encode(JSON.stringify([envelope])).byteLength).toBeLessThanOrEqual(
       MAX_BEACON_BODY_SIZE,
     );
+    expect(exception.hasFullStack).toBe(false);
     expect(exception.stack?.length).toBeLessThan(stack.length);
     expect(parsedStack[0]?.assembly).toContain("frame0");
     expect(parsedStack.at(-1)?.assembly).toContain("frame699");

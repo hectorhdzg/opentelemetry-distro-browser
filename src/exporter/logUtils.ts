@@ -260,7 +260,7 @@ export function logToEnvelope(
     const exceptionWithEmptyStrings = {
       typeName,
       message: "",
-      hasFullStack: Boolean(stack),
+      hasFullStack: false,
       ...(schemaLimitedStack === undefined ? {} : { stack: "" }),
     };
     const availableStringSize =
@@ -288,7 +288,7 @@ export function logToEnvelope(
     const exception = {
       typeName,
       message,
-      hasFullStack: Boolean(stack),
+      hasFullStack: Boolean(serializedStack) && emittedStack === serializedStack,
       stack: emittedStack,
     };
     const parsedStackSize = Math.min(
@@ -309,8 +309,6 @@ export function logToEnvelope(
           parsedStack,
         },
       ],
-      ...customFields,
-      severityLevel,
       ...customFields,
     };
   } else if (isPageView(logRecord.eventName)) {

@@ -23,6 +23,7 @@ import {
   EXCEPTION_MESSAGE,
   EXCEPTION_STACKTRACE,
   EXCEPTION_TYPE,
+  MAX_BEACON_BODY_SIZE,
   NAVIGATION_DURATION,
   NAVIGATION_EVENT_NAME,
   URL_FULL,
@@ -54,7 +55,6 @@ const promotedPageViewAttributes = /* @__PURE__ */ new Set([
   ATTR_PAGE_VIEW_REFERRER,
   URL_FULL,
 ]);
-const MAX_EXCEPTION_SIZE_IN_BYTES = 64 * 1024;
 const MAX_EXCEPTION_TYPE_LENGTH = 1024;
 const MAX_EXCEPTION_MESSAGE_LENGTH = 32 * 1024;
 const MAX_EXCEPTION_STACK_LENGTH = 32 * 1024;
@@ -219,11 +219,30 @@ export function logToEnvelope(
     logRecord.resource.attributes["service.name"],
   );
   const severityLevel = mapSeverity(logRecord.severityNumber);
+  const time = hrTimeToDate(logRecord.hrTime);
   let name: string;
   let baseType: AzureMonitorEnvelope["data"]["baseType"];
   let baseData: MessageData | ExceptionData | PageViewData | CustomEventData;
 
   if (logRecord.eventName === "exception" || logRecord.attributes[EXCEPTION_TYPE]) {
+    name = "Microsoft.ApplicationInsights.Exception";
+    baseType = "ExceptionData";
+    const baseDataWithoutException: ExceptionData = {
+      ver: 2,
+      exceptions: [],
+      severityLevel,
+      ...customFields,
+    };
+    const envelopeWithoutException = createEnvelope(
+      instrumentationKey,
+      name,
+      time,
+      tags,
+      baseType,
+      baseDataWithoutException,
+    );
+    const maxExceptionSize =
+      MAX_BEACON_BODY_SIZE - 2 - getUtf8Size(JSON.stringify(envelopeWithoutException));
     const stack = logRecord.attributes[EXCEPTION_STACKTRACE];
     const serializedStack = stack === undefined ? undefined : serializeAttribute(stack);
     const typeName = truncateToLength(
@@ -246,7 +265,7 @@ export function logToEnvelope(
       ...(schemaLimitedStack === undefined ? {} : { stack: "" }),
     };
     const availableStringSize =
-      MAX_EXCEPTION_SIZE_IN_BYTES -
+      maxExceptionSize -
       getUtf8Size(JSON.stringify(exceptionWithEmptyStrings)) +
       emptyStringSize * (schemaLimitedStack === undefined ? 1 : 2) -
       (schemaLimitedStack === undefined ? 0 : PARSED_STACK_PROPERTY_SIZE_IN_BYTES + 2);
@@ -275,7 +294,7 @@ export function logToEnvelope(
     };
     const parsedStackSize = Math.min(
       MAX_PARSED_STACK_SIZE_IN_BYTES,
-      MAX_EXCEPTION_SIZE_IN_BYTES -
+      maxExceptionSize -
         getUtf8Size(JSON.stringify(exception)) -
         PARSED_STACK_PROPERTY_SIZE_IN_BYTES,
     );
@@ -283,10 +302,8 @@ export function logToEnvelope(
       serializedStack === undefined || parsedStackSize < 2
         ? undefined
         : parseStack(serializedStack, parsedStackSize);
-    name = "Microsoft.ApplicationInsights.Exception";
-    baseType = "ExceptionData";
     baseData = {
-      ver: 2,
+      ...baseDataWithoutException,
       exceptions: [
         {
           ...exception,
@@ -343,12 +360,5 @@ export function logToEnvelope(
     };
   }
 
-  return createEnvelope(
-    instrumentationKey,
-    name,
-    hrTimeToDate(logRecord.hrTime),
-    tags,
-    baseType,
-    baseData,
-  );
+  return createEnvelope(instrumentationKey, name, time, tags, baseType, baseData);
 }

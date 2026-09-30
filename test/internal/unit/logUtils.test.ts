@@ -4,6 +4,7 @@
 import type { SpanContext } from "@opentelemetry/api";
 import type { ReadableLogRecord } from "@opentelemetry/sdk-logs";
 import { describe, expect, it } from "vitest";
+import { MAX_BEACON_BODY_SIZE } from "../../../src/exporter/constants.js";
 import { logToEnvelope } from "../../../src/exporter/logUtils.js";
 import type { ExceptionData } from "../../../src/exporter/telemetryModels.js";
 import { OPENTELEMETRY_BROWSER_VERSION } from "../../../src/shared/constants.js";
@@ -220,8 +221,8 @@ describe("Azure Monitor log envelope mapping", () => {
     const parsedStack = exception?.parsedStack;
     if (!parsedStack) throw new Error("Expected parsed stack frames");
 
-    expect(new TextEncoder().encode(JSON.stringify(exception)).byteLength).toBeLessThanOrEqual(
-      64 * 1024,
+    expect(new TextEncoder().encode(JSON.stringify([envelope])).byteLength).toBeLessThanOrEqual(
+      MAX_BEACON_BODY_SIZE,
     );
     expect(exception.stack?.length).toBeLessThan(stack.length);
     expect(parsedStack[0]?.assembly).toContain("frame0");

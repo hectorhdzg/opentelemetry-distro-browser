@@ -54,7 +54,10 @@ const promotedPageViewAttributes = /* @__PURE__ */ new Set([
   ATTR_PAGE_VIEW_REFERRER,
   URL_FULL,
 ]);
+const MAX_EXCEPTION_SIZE_IN_BYTES = 64 * 1024;
 const MAX_PARSED_STACK_SIZE_IN_BYTES = 32 * 1024;
+const textEncoder = new TextEncoder();
+const PARSED_STACK_PROPERTY_SIZE_IN_BYTES = textEncoder.encode(',"parsedStack":').byteLength;
 
 function isPageView(eventName: string | undefined): boolean {
   return eventName === EVENT_BROWSER_PAGE_VIEW || eventName === NAVIGATION_EVENT_NAME;
@@ -69,7 +72,7 @@ function mapSeverity(severityNumber: number | undefined): SeverityLevel | undefi
   return 4;
 }
 
-function parseStack(stack: string): readonly StackFrame[] | undefined {
+function parseStack(stack: string, maxSizeInBytes: number): readonly StackFrame[] | undefined {
   const frames: StackFrame[] = [];
 
   for (const assembly of stack.split("\n")) {
@@ -77,7 +80,7 @@ function parseStack(stack: string): readonly StackFrame[] | undefined {
     const startsWithAt = trimmed.startsWith("at ");
     const atSign = trimmed.indexOf("@");
     const scheme = trimmed.indexOf("://");
-    const hasAtLocation = atSign >= 0 && (scheme < 0 || atSign < scheme);
+    const hasAtLocation = atSign >= 0 && scheme > atSign;
     const isBareUrlLocation = scheme > 0 && !trimmed.slice(0, scheme).includes(" ");
     if (!startsWithAt && !hasAtLocation && !isBareUrlLocation) continue;
 
@@ -110,10 +113,9 @@ function parseStack(stack: string): readonly StackFrame[] | undefined {
 
   if (frames.length === 0) return undefined;
 
-  const encoder = new TextEncoder();
-  const sizes = frames.map((frame) => encoder.encode(JSON.stringify(frame)).byteLength);
+  const sizes = frames.map((frame) => textEncoder.encode(JSON.stringify(frame)).byteLength);
   const serializedSize = 2 + sizes.reduce((sum, size) => sum + size, 0) + frames.length - 1;
-  if (serializedSize <= MAX_PARSED_STACK_SIZE_IN_BYTES) return frames;
+  if (serializedSize <= maxSizeInBytes) return frames;
 
   const first: StackFrame[] = [];
   const last: StackFrame[] = [];
@@ -127,7 +129,7 @@ function parseStack(stack: string): readonly StackFrame[] | undefined {
       (isPair ? sizes[right] : 0) +
       (first.length + last.length === 0 ? 0 : 1) +
       (isPair ? 1 : 0);
-    if (selectedSize + addedSize > MAX_PARSED_STACK_SIZE_IN_BYTES) break;
+    if (selectedSize + addedSize > maxSizeInBytes) break;
     first.push(frames[left]);
     if (isPair) last.push(frames[right]);
     selectedSize += addedSize;
@@ -160,19 +162,30 @@ export function logToEnvelope(
   if (logRecord.eventName === "exception" || logRecord.attributes[EXCEPTION_TYPE]) {
     const stack = logRecord.attributes[EXCEPTION_STACKTRACE];
     const serializedStack = stack === undefined ? undefined : serializeAttribute(stack);
+    const exception = {
+      typeName: serializeAttribute(logRecord.attributes[EXCEPTION_TYPE] ?? "Error"),
+      message: serializeAttribute(
+        logRecord.attributes[EXCEPTION_MESSAGE] ?? logRecord.body ?? "Exception",
+      ),
+      hasFullStack: Boolean(stack),
+      stack: serializedStack,
+    };
+    const exceptionSize = textEncoder.encode(JSON.stringify(exception)).byteLength;
+    const parsedStackSize = Math.min(
+      MAX_PARSED_STACK_SIZE_IN_BYTES,
+      MAX_EXCEPTION_SIZE_IN_BYTES - exceptionSize - PARSED_STACK_PROPERTY_SIZE_IN_BYTES,
+    );
     name = "Microsoft.ApplicationInsights.Exception";
     baseType = "ExceptionData";
     baseData = {
       ver: 2,
       exceptions: [
         {
-          typeName: serializeAttribute(logRecord.attributes[EXCEPTION_TYPE] ?? "Error"),
-          message: serializeAttribute(
-            logRecord.attributes[EXCEPTION_MESSAGE] ?? logRecord.body ?? "Exception",
-          ),
-          hasFullStack: Boolean(stack),
-          stack: serializedStack,
-          parsedStack: serializedStack === undefined ? undefined : parseStack(serializedStack),
+          ...exception,
+          parsedStack:
+            serializedStack === undefined || parsedStackSize < 2
+              ? undefined
+              : parseStack(serializedStack, parsedStackSize),
         },
       ],
       severityLevel,

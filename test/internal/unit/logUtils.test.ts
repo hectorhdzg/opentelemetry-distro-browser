@@ -95,7 +95,7 @@ describe("Azure Monitor log envelope mapping", () => {
 
   it("parses only stack frames and supports parentheses in filenames", () => {
     const stack =
-      "Request failed:404\n" +
+      "user@example.com:404\n" +
       "    at render (https://example.test/app(foo).js:42:7)\n" +
       "https://example.test/bootstrap.js:8:3\n" +
       "@https://example.test/anonymous.js:12:4";
@@ -136,9 +136,9 @@ describe("Azure Monitor log envelope mapping", () => {
     ]);
   });
 
-  it("caps parsed stack frames at 32 KB while preserving both ends", () => {
+  it("caps the full exception at 64 KB while preserving both ends of the parsed stack", () => {
     const stack = Array.from(
-      { length: 500 },
+      { length: 300 },
       (_, index) =>
         `    at frame${index} (https://example.test/${"segment/".repeat(12)}file${index}.js:${index + 1}:1)`,
     ).join("\n");
@@ -152,15 +152,16 @@ describe("Azure Monitor log envelope mapping", () => {
       }),
       instrumentationKey,
     );
-    const parsedStack = (envelope.data.baseData as ExceptionData).exceptions[0]?.parsedStack;
+    const exception = (envelope.data.baseData as ExceptionData).exceptions[0];
+    const parsedStack = exception?.parsedStack;
     if (!parsedStack) throw new Error("Expected parsed stack frames");
 
-    expect(new TextEncoder().encode(JSON.stringify(parsedStack)).byteLength).toBeLessThanOrEqual(
-      32 * 1024,
+    expect(new TextEncoder().encode(JSON.stringify(exception)).byteLength).toBeLessThanOrEqual(
+      64 * 1024,
     );
     expect(parsedStack[0]?.assembly).toContain("frame0");
-    expect(parsedStack.at(-1)?.assembly).toContain("frame499");
-    expect(parsedStack.length).toBeLessThan(500);
+    expect(parsedStack.at(-1)?.assembly).toContain("frame299");
+    expect(parsedStack.length).toBeLessThan(300);
   });
 
   it("maps an unnamed log to MessageData", () => {

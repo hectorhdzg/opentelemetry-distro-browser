@@ -62,6 +62,7 @@ const MAX_PARSED_STACK_SIZE_IN_BYTES = 32 * 1024;
 const MAX_STACK_FRAME_FIELD_LENGTH = 1024;
 const STACK_PROPERTY_SIZE_IN_BYTES = 9;
 const PARSED_STACK_PROPERTY_SIZE_IN_BYTES = 15;
+let textEncoder: TextEncoder | undefined;
 
 function isPageView(eventName: string | undefined): boolean {
   return eventName === EVENT_BROWSER_PAGE_VIEW || eventName === NAVIGATION_EVENT_NAME;
@@ -77,7 +78,8 @@ function mapSeverity(severityNumber: number | undefined): SeverityLevel | undefi
 }
 
 function getUtf8Size(value: string): number {
-  return new TextEncoder().encode(value).byteLength;
+  textEncoder ??= new TextEncoder();
+  return textEncoder.encode(value).byteLength;
 }
 
 function truncateToLength(value: string, maxLength: number): string {
@@ -123,7 +125,7 @@ function parseStack(stack: string, maxSizeInBytes: number): readonly StackFrame[
       atSource.includes("\\") ||
       /\.(?:[cm]?js|jsx|ts|tsx|wasm|html?)$/i.test(atSource);
     const hasAtLocation =
-      atSign >= 0 && atSign < location.index && (locationWithColumn !== null || isLikelyCodeSource);
+      !startsWithAt && atSign >= 0 && atSign < location.index && isLikelyCodeSource;
     const isBareUrlLocation = scheme > 0 && !trimmed.slice(0, scheme).includes(" ");
     if (!startsWithAt && !hasAtLocation && !isBareUrlLocation) continue;
 

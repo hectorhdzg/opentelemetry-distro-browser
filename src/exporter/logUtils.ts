@@ -231,7 +231,6 @@ export function logToEnvelope(
       ver: 2,
       exceptions: [],
       severityLevel,
-      ...customFields,
     };
     const envelopeWithoutException = createEnvelope(
       instrumentationKey,
@@ -310,6 +309,7 @@ export function logToEnvelope(
           parsedStack,
         },
       ],
+      ...customFields,
       severityLevel,
       ...customFields,
     };

@@ -104,9 +104,23 @@ describe("AzureMonitorLogRecordExporter", () => {
       const body = sendBeacon.mock.calls[0][1] as Blob;
       expect(body.size).toBeLessThanOrEqual(MAX_BEACON_BODY_SIZE);
       const envelopes = JSON.parse(await body.text()) as Array<{
-        data: { baseData: { properties?: Record<string, string> } };
+        data: {
+          baseData: {
+            exceptions: Array<{
+              message: string;
+              stack?: string;
+              parsedStack?: unknown[];
+            }>;
+            properties?: Record<string, string>;
+          };
+        };
       }>;
       expect(envelopes[0]?.data.baseData.properties?.payload).toBeUndefined();
+      expect(envelopes[0]?.data.baseData.exceptions[0]).toMatchObject({
+        message: "Large custom field",
+        stack: "Error\n    at checkout (https://example.test/app.js:42:7)",
+        parsedStack: [expect.objectContaining({ method: "checkout", line: 42 })],
+      });
     } finally {
       endUnloading();
     }

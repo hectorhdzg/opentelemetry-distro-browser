@@ -13,12 +13,15 @@ All notable changes to this package are documented in this file.
 
 ### Changed
 
+- Fixed post-merge performance publishing for fork contributions by using the upstream
+  workflow context while retaining merged-commit-only checkout and export safeguards.
 - Added offline browser performance measurements and explicit result publishing after upstream
   pull requests merge into `main`, including minified, gzip, and Brotli bundle sizes.
 - Replaced proposal-era README content with installation, initialization, configuration,
   instrumentation, OTLP, resource detection, bundle size, and published-alpha guidance.
 - Cover page view and custom event e2e integration
 - Enforce exporter payload limits and test unload delivery.
+- Coalesce concurrent `forceFlush()` calls across trace and log processors.
 
 ## 0.1.0-alpha.1 - 2026-09-28
 

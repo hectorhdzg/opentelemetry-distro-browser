@@ -102,6 +102,7 @@ describe("Azure Monitor log envelope mapping", () => {
       "loadCart@app.js:19\n" +
       "saveCart@https://example.test/cart.js:20\n" +
       "    at https://cdn.example.test/node_modules/@scope/pkg/index.js:22:4\n" +
+      "https://cdn.example.test/node_modules/@scope/pkg/bare.js:23:5\n" +
       "bundle.js:23:5\n" +
       "src/relative.js:24:6\n" +
       "https://example.test/bootstrap.js:8:3\n" +
@@ -164,26 +165,33 @@ describe("Azure Monitor log envelope mapping", () => {
       {
         level: 6,
         method: "<no_method>",
+        assembly: "https://cdn.example.test/node_modules/@scope/pkg/bare.js:23:5",
+        fileName: "https://cdn.example.test/node_modules/@scope/pkg/bare.js",
+        line: 23,
+      },
+      {
+        level: 7,
+        method: "<no_method>",
         assembly: "bundle.js:23:5",
         fileName: "bundle.js",
         line: 23,
       },
       {
-        level: 7,
+        level: 8,
         method: "<no_method>",
         assembly: "src/relative.js:24:6",
         fileName: "src/relative.js",
         line: 24,
       },
       {
-        level: 8,
+        level: 9,
         method: "<no_method>",
         assembly: "https://example.test/bootstrap.js:8:3",
         fileName: "https://example.test/bootstrap.js",
         line: 8,
       },
       {
-        level: 9,
+        level: 10,
         method: "<no_method>",
         assembly: "@https://example.test/anonymous.js:12:4",
         fileName: "https://example.test/anonymous.js",
@@ -260,6 +268,27 @@ describe("Azure Monitor log envelope mapping", () => {
 
     expect(exception.typeName).toBe(typeName);
     expect(exception.message).toBe(message);
+  });
+
+  it("reserves raw stack space before allocating a multibyte message", () => {
+    const stack = "Error\n    at checkout (https://example.test/app.js:42:7)";
+    const envelope = logToEnvelope(
+      makeLog({
+        eventName: "exception",
+        attributes: {
+          "exception.message": "😀".repeat(32 * 1024),
+          "exception.stacktrace": stack,
+        },
+      }),
+      instrumentationKey,
+    );
+    const exception = (envelope.data.baseData as ExceptionData).exceptions[0];
+
+    expect(exception.stack).toBe(stack);
+    expect(exception.hasFullStack).toBe(true);
+    expect(new TextEncoder().encode(JSON.stringify(exception)).byteLength).toBeLessThanOrEqual(
+      64 * 1024,
+    );
   });
 
   it("maps an unnamed log to MessageData", () => {

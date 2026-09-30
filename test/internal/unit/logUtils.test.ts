@@ -102,6 +102,8 @@ describe("Azure Monitor log envelope mapping", () => {
       "loadCart@app.js:19\n" +
       "saveCart@https://example.test/cart.js:20\n" +
       "    at https://cdn.example.test/node_modules/@scope/pkg/index.js:22:4\n" +
+      "bundle.js:23:5\n" +
+      "src/relative.js:24:6\n" +
       "https://example.test/bootstrap.js:8:3\n" +
       "@https://example.test/anonymous.js:12:4";
     const envelope = logToEnvelope(
@@ -162,12 +164,26 @@ describe("Azure Monitor log envelope mapping", () => {
       {
         level: 6,
         method: "<no_method>",
+        assembly: "bundle.js:23:5",
+        fileName: "bundle.js",
+        line: 23,
+      },
+      {
+        level: 7,
+        method: "<no_method>",
+        assembly: "src/relative.js:24:6",
+        fileName: "src/relative.js",
+        line: 24,
+      },
+      {
+        level: 8,
+        method: "<no_method>",
         assembly: "https://example.test/bootstrap.js:8:3",
         fileName: "https://example.test/bootstrap.js",
         line: 8,
       },
       {
-        level: 7,
+        level: 9,
         method: "<no_method>",
         assembly: "@https://example.test/anonymous.js:12:4",
         fileName: "https://example.test/anonymous.js",
@@ -225,6 +241,25 @@ describe("Azure Monitor log envelope mapping", () => {
     expect(frame.method.length).toBe(1024);
     expect(frame.assembly.length).toBe(1024);
     expect(frame.fileName.length).toBe(1024);
+  });
+
+  it("applies exception character limits before the aggregate byte limit", () => {
+    const typeName = "T".repeat(1024);
+    const message = "é".repeat(1024);
+    const envelope = logToEnvelope(
+      makeLog({
+        eventName: "exception",
+        attributes: {
+          "exception.type": typeName,
+          "exception.message": message,
+        },
+      }),
+      instrumentationKey,
+    );
+    const exception = (envelope.data.baseData as ExceptionData).exceptions[0];
+
+    expect(exception.typeName).toBe(typeName);
+    expect(exception.message).toBe(message);
   });
 
   it("maps an unnamed log to MessageData", () => {

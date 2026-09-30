@@ -55,9 +55,9 @@ const promotedPageViewAttributes = /* @__PURE__ */ new Set([
   URL_FULL,
 ]);
 const MAX_EXCEPTION_SIZE_IN_BYTES = 64 * 1024;
-const MAX_EXCEPTION_TYPE_SIZE_IN_BYTES = 1024;
-const MAX_EXCEPTION_MESSAGE_SIZE_IN_BYTES = 32 * 1024;
-const MAX_EXCEPTION_STACK_SIZE_IN_BYTES = 32 * 1024;
+const MAX_EXCEPTION_TYPE_LENGTH = 1024;
+const MAX_EXCEPTION_MESSAGE_LENGTH = 32 * 1024;
+const MAX_EXCEPTION_STACK_LENGTH = 32 * 1024;
 const MAX_PARSED_STACK_SIZE_IN_BYTES = 32 * 1024;
 const MAX_STACK_FRAME_FIELD_LENGTH = 1024;
 const STACK_PROPERTY_SIZE_IN_BYTES = 9;
@@ -105,6 +105,15 @@ function truncateJsonStringToSize(value: string, maxSizeInBytes: number): string
   return truncateToLength(value, low);
 }
 
+function isLikelyCodeSource(source: string): boolean {
+  return (
+    source.includes("://") ||
+    source.includes("/") ||
+    source.includes("\\") ||
+    /\.(?:[cm]?js|jsx|ts|tsx|wasm|html?)$/i.test(source)
+  );
+}
+
 function parseStack(stack: string, maxSizeInBytes: number): readonly StackFrame[] | undefined {
   const frames: StackFrame[] = [];
 
@@ -116,18 +125,14 @@ function parseStack(stack: string, maxSizeInBytes: number): readonly StackFrame[
 
     const startsWithAt = trimmed.startsWith("at ");
     const atSign = trimmed.indexOf("@");
-    const scheme = trimmed.indexOf("://");
     const atSource =
       atSign >= 0 && atSign < location.index ? trimmed.slice(atSign + 1, location.index) : "";
-    const isLikelyCodeSource =
-      atSource.includes("://") ||
-      atSource.includes("/") ||
-      atSource.includes("\\") ||
-      /\.(?:[cm]?js|jsx|ts|tsx|wasm|html?)$/i.test(atSource);
     const hasAtLocation =
-      !startsWithAt && atSign >= 0 && atSign < location.index && isLikelyCodeSource;
-    const isBareUrlLocation = scheme > 0 && !trimmed.slice(0, scheme).includes(" ");
-    if (!startsWithAt && !hasAtLocation && !isBareUrlLocation) continue;
+      !startsWithAt && atSign >= 0 && atSign < location.index && isLikelyCodeSource(atSource);
+    const bareSource = trimmed.slice(0, location.index);
+    const isBareSourceLocation =
+      !bareSource.includes(" ") && isLikelyCodeSource(bareSource.replace(/\)?$/, ""));
+    if (!startsWithAt && !hasAtLocation && !isBareSourceLocation) continue;
 
     const prefix = trimmed.slice(0, location.index);
     const openParenthesis = prefix.indexOf(" (");
@@ -216,31 +221,40 @@ export function logToEnvelope(
   if (logRecord.eventName === "exception" || logRecord.attributes[EXCEPTION_TYPE]) {
     const stack = logRecord.attributes[EXCEPTION_STACKTRACE];
     const serializedStack = stack === undefined ? undefined : serializeAttribute(stack);
-    const exceptionWithoutStack = {
-      typeName:
-        truncateJsonStringToSize(
-          serializeAttribute(logRecord.attributes[EXCEPTION_TYPE] ?? "Error"),
-          MAX_EXCEPTION_TYPE_SIZE_IN_BYTES,
-        ) ?? "",
-      message:
-        truncateJsonStringToSize(
-          serializeAttribute(
-            logRecord.attributes[EXCEPTION_MESSAGE] ?? logRecord.body ?? "Exception",
-          ),
-          MAX_EXCEPTION_MESSAGE_SIZE_IN_BYTES,
-        ) ?? "",
+    const typeName = truncateToLength(
+      serializeAttribute(logRecord.attributes[EXCEPTION_TYPE] ?? "Error"),
+      MAX_EXCEPTION_TYPE_LENGTH,
+    );
+    const schemaLimitedMessage = truncateToLength(
+      serializeAttribute(logRecord.attributes[EXCEPTION_MESSAGE] ?? logRecord.body ?? "Exception"),
+      MAX_EXCEPTION_MESSAGE_LENGTH,
+    );
+    const exceptionWithEmptyMessage = {
+      typeName,
+      message: "",
       hasFullStack: Boolean(stack),
     };
-    const stackSize = Math.min(
-      MAX_EXCEPTION_STACK_SIZE_IN_BYTES,
+    const messageSize =
       MAX_EXCEPTION_SIZE_IN_BYTES -
-        getUtf8Size(JSON.stringify(exceptionWithoutStack)) -
-        STACK_PROPERTY_SIZE_IN_BYTES,
-    );
+      getUtf8Size(JSON.stringify(exceptionWithEmptyMessage)) +
+      getUtf8Size(JSON.stringify(""));
+    const message = truncateJsonStringToSize(schemaLimitedMessage, messageSize) ?? "";
+    const exceptionWithoutStack = {
+      typeName,
+      message,
+      hasFullStack: Boolean(stack),
+    };
+    const stackSize =
+      MAX_EXCEPTION_SIZE_IN_BYTES -
+      getUtf8Size(JSON.stringify(exceptionWithoutStack)) -
+      STACK_PROPERTY_SIZE_IN_BYTES;
     const emittedStack =
       serializedStack === undefined
         ? undefined
-        : truncateJsonStringToSize(serializedStack, stackSize);
+        : truncateJsonStringToSize(
+            truncateToLength(serializedStack, MAX_EXCEPTION_STACK_LENGTH),
+            stackSize,
+          );
     const exception = {
       ...exceptionWithoutStack,
       stack: emittedStack,

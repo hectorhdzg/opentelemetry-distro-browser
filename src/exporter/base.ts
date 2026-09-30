@@ -6,7 +6,7 @@ import { ExportResultCode } from "@opentelemetry/core";
 import { isSamplingRejection, parseBreezeResponse } from "./breezeUtils.js";
 import { isUnloading } from "./common.js";
 import { isValidInstrumentationKey, parseConnectionString } from "./connectionStringParser.js";
-import { MAX_BATCH_SIZE_IN_BYTES } from "./constants.js";
+import { MAX_BATCH_SIZE_IN_BYTES, MAX_BEACON_BODY_SIZE } from "./constants.js";
 import { Sender, type SenderResultType } from "./sender.js";
 import type { AzureMonitorEnvelope } from "./telemetryModels.js";
 
@@ -59,7 +59,10 @@ export class AzureMonitorExportClient {
     }
 
     const unloading = isUnloading();
-    const requests = createBatchRequests(envelopes);
+    const requests = createBatchRequests(
+      envelopes,
+      unloading ? MAX_BEACON_BODY_SIZE : MAX_BATCH_SIZE_IN_BYTES,
+    );
     const operation = Promise.allSettled(
       requests.map(({ body, envelopes: batchEnvelopes }) =>
         this.sender.send({
@@ -99,7 +102,10 @@ export class AzureMonitorExportClient {
   }
 }
 
-function createBatchRequests(envelopes: readonly AzureMonitorEnvelope[]): Array<{
+function createBatchRequests(
+  envelopes: readonly AzureMonitorEnvelope[],
+  maxBatchSize: number,
+): Array<{
   body: Uint8Array<ArrayBuffer>;
   envelopes: readonly AzureMonitorEnvelope[];
 }> {
@@ -127,7 +133,7 @@ function createBatchRequests(envelopes: readonly AzureMonitorEnvelope[]): Array<
     const serialized = JSON.stringify(envelope);
     const serializedSize = encoder.encode(serialized).byteLength;
     const separatorSize = batch.length === 0 ? 0 : 1;
-    if (batch.length > 0 && batchSize + separatorSize + serializedSize > MAX_BATCH_SIZE_IN_BYTES) {
+    if (batch.length > 0 && batchSize + separatorSize + serializedSize > maxBatchSize) {
       flush();
     }
     batch.push(envelope);

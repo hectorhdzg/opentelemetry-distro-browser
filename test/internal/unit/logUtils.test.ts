@@ -97,6 +97,8 @@ describe("Azure Monitor log envelope mapping", () => {
     const stack =
       "user@example.com:404\n" +
       "    at render (https://example.test/app(foo).js:42:7)\n" +
+      "    at hydrate bundle.js:21:5\n" +
+      "restoreCart@app.js:18:3\n" +
       "https://example.test/bootstrap.js:8:3\n" +
       "@https://example.test/anonymous.js:12:4";
     const envelope = logToEnvelope(
@@ -121,13 +123,27 @@ describe("Azure Monitor log envelope mapping", () => {
       },
       {
         level: 1,
+        method: "hydrate",
+        assembly: "at hydrate bundle.js:21:5",
+        fileName: "bundle.js",
+        line: 21,
+      },
+      {
+        level: 2,
+        method: "restoreCart",
+        assembly: "restoreCart@app.js:18:3",
+        fileName: "app.js",
+        line: 18,
+      },
+      {
+        level: 3,
         method: "<no_method>",
         assembly: "https://example.test/bootstrap.js:8:3",
         fileName: "https://example.test/bootstrap.js",
         line: 8,
       },
       {
-        level: 2,
+        level: 4,
         method: "<no_method>",
         assembly: "@https://example.test/anonymous.js:12:4",
         fileName: "https://example.test/anonymous.js",

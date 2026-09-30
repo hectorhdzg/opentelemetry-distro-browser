@@ -80,29 +80,43 @@ function parseStack(stack: string, maxSizeInBytes: number): readonly StackFrame[
 
   for (const assembly of stack.split("\n")) {
     const trimmed = assembly.trim();
+    const locationWithColumn = /:(\d+):\d+\)?$/.exec(trimmed);
+    const location = locationWithColumn ?? /:(\d+)\)?$/.exec(trimmed);
+    if (!location) continue;
+
     const startsWithAt = trimmed.startsWith("at ");
     const atSign = trimmed.indexOf("@");
     const scheme = trimmed.indexOf("://");
-    const hasAtLocation = atSign >= 0 && scheme > atSign;
+    const hasAtLocation =
+      atSign >= 0 && locationWithColumn !== null && atSign < locationWithColumn.index;
     const isBareUrlLocation = scheme > 0 && !trimmed.slice(0, scheme).includes(" ");
     if (!startsWithAt && !hasAtLocation && !isBareUrlLocation) continue;
 
-    const location = /:(\d+):\d+\)?$/.exec(trimmed) ?? /:(\d+)\)?$/.exec(trimmed);
-    if (!location) continue;
-
     const prefix = trimmed.slice(0, location.index);
     const openParenthesis = prefix.indexOf(" (");
-    const separator = openParenthesis >= 0 ? openParenthesis + 1 : hasAtLocation ? atSign : -1;
-    const method =
-      separator < 0
-        ? "<no_method>"
-        : prefix
-            .slice(0, separator)
-            .replace(/^\s*at\s+/, "")
-            .trim() || "<no_method>";
-    const fileName = (separator < 0 ? prefix : prefix.slice(separator + 1))
-      .replace(/^\s*at\s+/, "")
-      .trim();
+    let method = "<no_method>";
+    let fileName = prefix.replace(/^\s*at\s+/, "").trim();
+    if (openParenthesis >= 0) {
+      method =
+        prefix
+          .slice(0, openParenthesis)
+          .replace(/^\s*at\s+/, "")
+          .trim() || method;
+      fileName = prefix.slice(openParenthesis + 2).trim();
+    } else if (hasAtLocation) {
+      method =
+        prefix
+          .slice(0, atSign)
+          .replace(/^\s*at\s+/, "")
+          .trim() || method;
+      fileName = prefix.slice(atSign + 1).trim();
+    } else if (startsWithAt) {
+      const separator = fileName.lastIndexOf(" ");
+      if (separator >= 0) {
+        method = fileName.slice(0, separator).trim() || method;
+        fileName = fileName.slice(separator + 1).trim();
+      }
+    }
     if (!fileName) continue;
 
     frames.push({

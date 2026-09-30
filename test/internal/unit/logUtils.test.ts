@@ -170,7 +170,7 @@ describe("Azure Monitor log envelope mapping", () => {
 
   it("caps the full exception at 64 KB while preserving both ends of the parsed stack", () => {
     const stack = Array.from(
-      { length: 300 },
+      { length: 700 },
       (_, index) =>
         `    at frame${index} (https://example.test/${"segment/".repeat(12)}file${index}.js:${index + 1}:1)`,
     ).join("\n");
@@ -191,9 +191,32 @@ describe("Azure Monitor log envelope mapping", () => {
     expect(new TextEncoder().encode(JSON.stringify(exception)).byteLength).toBeLessThanOrEqual(
       64 * 1024,
     );
+    expect(exception.stack?.length).toBeLessThan(stack.length);
     expect(parsedStack[0]?.assembly).toContain("frame0");
-    expect(parsedStack.at(-1)?.assembly).toContain("frame299");
-    expect(parsedStack.length).toBeLessThan(300);
+    expect(parsedStack.at(-1)?.assembly).toContain("frame699");
+    expect(parsedStack.length).toBeLessThan(700);
+  });
+
+  it("limits parsed stack frame fields to Azure Monitor schema lengths", () => {
+    const method = "m".repeat(1100);
+    const fileName = `${"path/".repeat(220)}app.js`;
+    const stack = `    at ${method} (${fileName}:42:7)`;
+    const envelope = logToEnvelope(
+      makeLog({
+        eventName: "exception",
+        attributes: {
+          "exception.message": "Long frame",
+          "exception.stacktrace": stack,
+        },
+      }),
+      instrumentationKey,
+    );
+    const frame = (envelope.data.baseData as ExceptionData).exceptions[0]?.parsedStack?.[0];
+    if (!frame) throw new Error("Expected a parsed stack frame");
+
+    expect(frame.method.length).toBe(1024);
+    expect(frame.assembly.length).toBe(1024);
+    expect(frame.fileName.length).toBe(1024);
   });
 
   it("maps an unnamed log to MessageData", () => {

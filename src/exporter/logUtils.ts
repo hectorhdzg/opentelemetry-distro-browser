@@ -55,7 +55,12 @@ const promotedPageViewAttributes = /* @__PURE__ */ new Set([
   URL_FULL,
 ]);
 const MAX_EXCEPTION_SIZE_IN_BYTES = 64 * 1024;
+const MAX_EXCEPTION_TYPE_SIZE_IN_BYTES = 1024;
+const MAX_EXCEPTION_MESSAGE_SIZE_IN_BYTES = 32 * 1024;
+const MAX_EXCEPTION_STACK_SIZE_IN_BYTES = 32 * 1024;
 const MAX_PARSED_STACK_SIZE_IN_BYTES = 32 * 1024;
+const MAX_STACK_FRAME_FIELD_LENGTH = 1024;
+const STACK_PROPERTY_SIZE_IN_BYTES = 9;
 const PARSED_STACK_PROPERTY_SIZE_IN_BYTES = 15;
 
 function isPageView(eventName: string | undefined): boolean {
@@ -73,6 +78,29 @@ function mapSeverity(severityNumber: number | undefined): SeverityLevel | undefi
 
 function getUtf8Size(value: string): number {
   return new TextEncoder().encode(value).byteLength;
+}
+
+function truncateToLength(value: string, maxLength: number): string {
+  if (value.length <= maxLength) return value;
+  const truncated = value.slice(0, maxLength);
+  return /[\uD800-\uDBFF]$/.test(truncated) ? truncated.slice(0, -1) : truncated;
+}
+
+function truncateJsonStringToSize(value: string, maxSizeInBytes: number): string | undefined {
+  if (maxSizeInBytes < 2) return undefined;
+  if (getUtf8Size(JSON.stringify(value)) <= maxSizeInBytes) return value;
+
+  let low = 0;
+  let high = value.length;
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    if (getUtf8Size(JSON.stringify(truncateToLength(value, middle))) <= maxSizeInBytes) {
+      low = middle;
+    } else {
+      high = middle - 1;
+    }
+  }
+  return truncateToLength(value, low);
 }
 
 function parseStack(stack: string, maxSizeInBytes: number): readonly StackFrame[] | undefined {
@@ -128,9 +156,9 @@ function parseStack(stack: string, maxSizeInBytes: number): readonly StackFrame[
 
     frames.push({
       level: frames.length,
-      method,
-      assembly: trimmed,
-      fileName,
+      method: truncateToLength(method, MAX_STACK_FRAME_FIELD_LENGTH),
+      assembly: truncateToLength(trimmed, MAX_STACK_FRAME_FIELD_LENGTH),
+      fileName: truncateToLength(fileName, MAX_STACK_FRAME_FIELD_LENGTH),
       line: Number(location[1]),
     });
   }
@@ -186,19 +214,45 @@ export function logToEnvelope(
   if (logRecord.eventName === "exception" || logRecord.attributes[EXCEPTION_TYPE]) {
     const stack = logRecord.attributes[EXCEPTION_STACKTRACE];
     const serializedStack = stack === undefined ? undefined : serializeAttribute(stack);
-    const exception = {
-      typeName: serializeAttribute(logRecord.attributes[EXCEPTION_TYPE] ?? "Error"),
-      message: serializeAttribute(
-        logRecord.attributes[EXCEPTION_MESSAGE] ?? logRecord.body ?? "Exception",
-      ),
+    const exceptionWithoutStack = {
+      typeName:
+        truncateJsonStringToSize(
+          serializeAttribute(logRecord.attributes[EXCEPTION_TYPE] ?? "Error"),
+          MAX_EXCEPTION_TYPE_SIZE_IN_BYTES,
+        ) ?? "",
+      message:
+        truncateJsonStringToSize(
+          serializeAttribute(
+            logRecord.attributes[EXCEPTION_MESSAGE] ?? logRecord.body ?? "Exception",
+          ),
+          MAX_EXCEPTION_MESSAGE_SIZE_IN_BYTES,
+        ) ?? "",
       hasFullStack: Boolean(stack),
-      stack: serializedStack,
     };
-    const exceptionSize = getUtf8Size(JSON.stringify(exception));
+    const stackSize = Math.min(
+      MAX_EXCEPTION_STACK_SIZE_IN_BYTES,
+      MAX_EXCEPTION_SIZE_IN_BYTES -
+        getUtf8Size(JSON.stringify(exceptionWithoutStack)) -
+        STACK_PROPERTY_SIZE_IN_BYTES,
+    );
+    const emittedStack =
+      serializedStack === undefined
+        ? undefined
+        : truncateJsonStringToSize(serializedStack, stackSize);
+    const exception = {
+      ...exceptionWithoutStack,
+      stack: emittedStack,
+    };
     const parsedStackSize = Math.min(
       MAX_PARSED_STACK_SIZE_IN_BYTES,
-      MAX_EXCEPTION_SIZE_IN_BYTES - exceptionSize - PARSED_STACK_PROPERTY_SIZE_IN_BYTES,
+      MAX_EXCEPTION_SIZE_IN_BYTES -
+        getUtf8Size(JSON.stringify(exception)) -
+        PARSED_STACK_PROPERTY_SIZE_IN_BYTES,
     );
+    const parsedStack =
+      serializedStack === undefined || parsedStackSize < 2
+        ? undefined
+        : parseStack(serializedStack, parsedStackSize);
     name = "Microsoft.ApplicationInsights.Exception";
     baseType = "ExceptionData";
     baseData = {
@@ -206,10 +260,7 @@ export function logToEnvelope(
       exceptions: [
         {
           ...exception,
-          parsedStack:
-            serializedStack === undefined || parsedStackSize < 2
-              ? undefined
-              : parseStack(serializedStack, parsedStackSize),
+          parsedStack,
         },
       ],
       severityLevel,

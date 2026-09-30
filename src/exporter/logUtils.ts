@@ -56,8 +56,7 @@ const promotedPageViewAttributes = /* @__PURE__ */ new Set([
 ]);
 const MAX_EXCEPTION_SIZE_IN_BYTES = 64 * 1024;
 const MAX_PARSED_STACK_SIZE_IN_BYTES = 32 * 1024;
-const textEncoder = new TextEncoder();
-const PARSED_STACK_PROPERTY_SIZE_IN_BYTES = textEncoder.encode(',"parsedStack":').byteLength;
+const PARSED_STACK_PROPERTY_SIZE_IN_BYTES = 15;
 
 function isPageView(eventName: string | undefined): boolean {
   return eventName === EVENT_BROWSER_PAGE_VIEW || eventName === NAVIGATION_EVENT_NAME;
@@ -70,6 +69,10 @@ function mapSeverity(severityNumber: number | undefined): SeverityLevel | undefi
   if (severityNumber < 17) return 2;
   if (severityNumber < 21) return 3;
   return 4;
+}
+
+function getUtf8Size(value: string): number {
+  return new TextEncoder().encode(value).byteLength;
 }
 
 function parseStack(stack: string, maxSizeInBytes: number): readonly StackFrame[] | undefined {
@@ -113,7 +116,7 @@ function parseStack(stack: string, maxSizeInBytes: number): readonly StackFrame[
 
   if (frames.length === 0) return undefined;
 
-  const sizes = frames.map((frame) => textEncoder.encode(JSON.stringify(frame)).byteLength);
+  const sizes = frames.map((frame) => getUtf8Size(JSON.stringify(frame)));
   const serializedSize = 2 + sizes.reduce((sum, size) => sum + size, 0) + frames.length - 1;
   if (serializedSize <= maxSizeInBytes) return frames;
 
@@ -170,7 +173,7 @@ export function logToEnvelope(
       hasFullStack: Boolean(stack),
       stack: serializedStack,
     };
-    const exceptionSize = textEncoder.encode(JSON.stringify(exception)).byteLength;
+    const exceptionSize = getUtf8Size(JSON.stringify(exception));
     const parsedStackSize = Math.min(
       MAX_PARSED_STACK_SIZE_IN_BYTES,
       MAX_EXCEPTION_SIZE_IN_BYTES - exceptionSize - PARSED_STACK_PROPERTY_SIZE_IN_BYTES,

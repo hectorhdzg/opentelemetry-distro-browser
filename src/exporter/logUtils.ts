@@ -87,8 +87,15 @@ function parseStack(stack: string, maxSizeInBytes: number): readonly StackFrame[
     const startsWithAt = trimmed.startsWith("at ");
     const atSign = trimmed.indexOf("@");
     const scheme = trimmed.indexOf("://");
+    const atSource =
+      atSign >= 0 && atSign < location.index ? trimmed.slice(atSign + 1, location.index) : "";
+    const isLikelyCodeSource =
+      atSource.includes("://") ||
+      atSource.includes("/") ||
+      atSource.includes("\\") ||
+      /\.(?:[cm]?js|jsx|ts|tsx|wasm|html?)$/i.test(atSource);
     const hasAtLocation =
-      atSign >= 0 && locationWithColumn !== null && atSign < locationWithColumn.index;
+      atSign >= 0 && atSign < location.index && (locationWithColumn !== null || isLikelyCodeSource);
     const isBareUrlLocation = scheme > 0 && !trimmed.slice(0, scheme).includes(" ");
     if (!startsWithAt && !hasAtLocation && !isBareUrlLocation) continue;
 

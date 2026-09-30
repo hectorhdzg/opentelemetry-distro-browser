@@ -8,7 +8,7 @@ import { isUnloading } from "./common.js";
 import { isValidInstrumentationKey, parseConnectionString } from "./connectionStringParser.js";
 import { MAX_BATCH_SIZE_IN_BYTES, MAX_BEACON_BODY_SIZE } from "./constants.js";
 import { Sender, type SenderResultType } from "./sender.js";
-import type { AzureMonitorEnvelope } from "./telemetryModels.js";
+import type { AzureMonitorBaseData, AzureMonitorEnvelope } from "./telemetryModels.js";
 
 const CONTENT_TYPE = "application/json";
 
@@ -59,10 +59,20 @@ export class AzureMonitorExportClient {
     }
 
     const unloading = isUnloading();
-    const requests = createBatchRequests(
-      envelopes,
-      unloading ? MAX_BEACON_BODY_SIZE : MAX_BATCH_SIZE_IN_BYTES,
-    );
+    let requests: ReturnType<typeof createBatchRequests>;
+    try {
+      requests = createBatchRequests(
+        envelopes,
+        unloading ? MAX_BEACON_BODY_SIZE : MAX_BATCH_SIZE_IN_BYTES,
+        !unloading,
+      );
+    } catch (error) {
+      callback({
+        code: ExportResultCode.FAILED,
+        error: error instanceof Error ? error : new Error(String(error)),
+      });
+      return;
+    }
     const operation = Promise.allSettled(
       requests.map(({ body, envelopes: batchEnvelopes }) =>
         this.sender.send({
@@ -105,6 +115,7 @@ export class AzureMonitorExportClient {
 function createBatchRequests(
   envelopes: readonly AzureMonitorEnvelope[],
   maxBatchSize: number,
+  allowMultipleBatches: boolean,
 ): Array<{
   body: Uint8Array<ArrayBuffer>;
   envelopes: readonly AzureMonitorEnvelope[];
@@ -130,18 +141,86 @@ function createBatchRequests(
   };
 
   for (const envelope of envelopes) {
-    const serialized = JSON.stringify(envelope);
+    const fittedEnvelope = allowMultipleBatches
+      ? envelope
+      : fitEnvelopeCustomFields(envelope, maxBatchSize - 2, encoder);
+    const serialized = JSON.stringify(fittedEnvelope);
     const serializedSize = encoder.encode(serialized).byteLength;
+    if (!allowMultipleBatches && serializedSize + 2 > maxBatchSize) {
+      throw new RangeError(
+        `Envelope size ${serializedSize + 2} exceeds the ${maxBatchSize} byte payload limit.`,
+      );
+    }
     const separatorSize = batch.length === 0 ? 0 : 1;
     if (batch.length > 0 && batchSize + separatorSize + serializedSize > maxBatchSize) {
+      if (!allowMultipleBatches) {
+        throw new RangeError(
+          `Unload payload size ${batchSize + separatorSize + serializedSize} exceeds the ${maxBatchSize} byte aggregate limit.`,
+        );
+      }
       flush();
     }
-    batch.push(envelope);
+    batch.push(fittedEnvelope);
     serializedBatch.push(serialized);
     batchSize += (batch.length === 1 ? 0 : 1) + serializedSize;
   }
   flush();
   return requests;
+}
+
+function fitEnvelopeCustomFields(
+  envelope: AzureMonitorEnvelope,
+  maxSerializedSize: number,
+  encoder: TextEncoder,
+): AzureMonitorEnvelope {
+  if (encoder.encode(JSON.stringify(envelope)).byteLength <= maxSerializedSize) {
+    return envelope;
+  }
+
+  const sourceBaseData = envelope.data.baseData;
+  const properties = sourceBaseData.properties ? { ...sourceBaseData.properties } : undefined;
+  const measurements = sourceBaseData.measurements ? { ...sourceBaseData.measurements } : undefined;
+  if (!properties && !measurements) return envelope;
+
+  const createFittedEnvelope = (): AzureMonitorEnvelope => {
+    const baseData: AzureMonitorBaseData = {
+      ...sourceBaseData,
+      properties: properties && Object.keys(properties).length > 0 ? properties : undefined,
+      measurements: measurements && Object.keys(measurements).length > 0 ? measurements : undefined,
+    };
+    return {
+      ...envelope,
+      data: { ...envelope.data, baseData },
+    };
+  };
+  let fittedEnvelope = createFittedEnvelope();
+  const customFields: Array<{ size: number; remove: () => void }> = [];
+  if (properties) {
+    for (const key of Object.keys(properties)) {
+      customFields.push({
+        size: encoder.encode(JSON.stringify([key, properties[key]])).byteLength,
+        remove: () => delete properties[key],
+      });
+    }
+  }
+  if (measurements) {
+    for (const key of Object.keys(measurements)) {
+      customFields.push({
+        size: encoder.encode(JSON.stringify([key, measurements[key]])).byteLength,
+        remove: () => delete measurements[key],
+      });
+    }
+  }
+  customFields.sort((left, right) => right.size - left.size);
+
+  for (const field of customFields) {
+    field.remove();
+    fittedEnvelope = createFittedEnvelope();
+    if (encoder.encode(JSON.stringify(fittedEnvelope)).byteLength <= maxSerializedSize) {
+      return fittedEnvelope;
+    }
+  }
+  return fittedEnvelope;
 }
 
 function toExportResult(results: readonly SenderResultType[]): ExportResult {

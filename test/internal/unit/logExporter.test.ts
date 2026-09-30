@@ -47,7 +47,7 @@ describe("AzureMonitorLogRecordExporter", () => {
     expect(fetch).toHaveBeenCalledOnce();
   });
 
-  it("splits unload batches at the beacon body limit", async () => {
+  it("rejects unload exports that exceed the aggregate beacon body limit", async () => {
     const fetch = vi.fn<typeof globalThis.fetch>(async () => {
       throw new TypeError("page unloading");
     });
@@ -70,11 +70,43 @@ describe("AzureMonitorLogRecordExporter", () => {
     try {
       await expect(
         exportLogs(exporter, [largeException, makeLog({ body: "x".repeat(10 * 1024) })]),
+      ).resolves.toMatchObject({ code: ExportResultCode.FAILED });
+      expect(fetch).not.toHaveBeenCalled();
+      expect(sendBeacon).not.toHaveBeenCalled();
+    } finally {
+      endUnloading();
+    }
+  });
+
+  it("removes oversized custom fields before unload delivery", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => {
+      throw new TypeError("page unloading");
+    });
+    vi.stubGlobal("fetch", fetch);
+    const sendBeacon = vi.spyOn(navigator, "sendBeacon").mockReturnValue(true);
+    const exporter = new AzureMonitorLogRecordExporter({ connectionString });
+    beginUnloading();
+
+    try {
+      await expect(
+        exportLogs(exporter, [
+          makeLog({
+            eventName: "exception",
+            attributes: {
+              "exception.message": "Large custom field",
+              "exception.stacktrace": "Error\n    at checkout (https://example.test/app.js:42:7)",
+              payload: "x".repeat(MAX_BEACON_BODY_SIZE),
+            },
+          }),
+        ]),
       ).resolves.toEqual({ code: ExportResultCode.SUCCESS });
-      expect(sendBeacon).toHaveBeenCalledTimes(2);
-      for (const [, body] of sendBeacon.mock.calls) {
-        expect((body as Blob).size).toBeLessThanOrEqual(MAX_BEACON_BODY_SIZE);
-      }
+      expect(sendBeacon).toHaveBeenCalledOnce();
+      const body = sendBeacon.mock.calls[0][1] as Blob;
+      expect(body.size).toBeLessThanOrEqual(MAX_BEACON_BODY_SIZE);
+      const envelopes = JSON.parse(await body.text()) as Array<{
+        data: { baseData: { properties?: Record<string, string> } };
+      }>;
+      expect(envelopes[0]?.data.baseData.properties?.payload).toBeUndefined();
     } finally {
       endUnloading();
     }

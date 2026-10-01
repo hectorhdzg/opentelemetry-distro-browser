@@ -178,9 +178,15 @@ it.each(["both", "context manager", "propagators", "no propagators"] as const)(
       },
       traces: {
         ...traces,
-        processors: [pipeline.spanProcessor],
+        processors: [
+          expect.objectContaining({ onStart: expect.any(Function) }),
+          pipeline.spanProcessor,
+        ],
       },
-      logs: { processors: undefined },
+      logs: {
+        processors: [expect.objectContaining({ onEmit: expect.any(Function) })],
+        exportConfig: {},
+      },
     });
     const forwarded = vi.mocked(startBrowserSdk).mock.calls[0]?.[0]?.traces;
     expect(forwarded?.propagators).not.toBe(propagators);

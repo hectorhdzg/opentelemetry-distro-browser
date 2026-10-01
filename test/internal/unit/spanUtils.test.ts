@@ -91,6 +91,29 @@ describe("Azure Monitor span envelope mapping", () => {
     });
   });
 
+  it.each(["user.id", "enduser.id"])(
+    "maps %s to authenticated user context and promotes user tags",
+    (attribute) => {
+      const envelope = spanToEnvelope(
+        makeSpan({
+          attributes: {
+            [attribute]: "signed-in-user",
+            "enduser.pseudo.id": "anonymous-user",
+            "user.account.id": "tenant-42",
+          },
+        }),
+        instrumentationKey,
+      );
+
+      expect(envelope.tags).toMatchObject({
+        "ai.user.id": "anonymous-user",
+        "ai.user.authUserId": "signed-in-user",
+        "ai.user.accountId": "tenant-42",
+      });
+      expect(envelope.data.baseData.properties).toBeUndefined();
+    },
+  );
+
   it("maps a server span to RequestData", () => {
     const envelope = spanToEnvelope(
       makeSpan({

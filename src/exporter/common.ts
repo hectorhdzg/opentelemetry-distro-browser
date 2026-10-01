@@ -5,6 +5,12 @@ import type { Attributes, HrTime, SpanContext } from "@opentelemetry/api";
 import { OPENTELEMETRY_BROWSER_VERSION } from "../shared/constants.js";
 import { syntheticPageContexts } from "../shared/pageOperationContext.js";
 import type { AzureMonitorBaseData, AzureMonitorEnvelope } from "./telemetryModels.js";
+import {
+  ATTR_ENDUSER_ID,
+  ATTR_ENDUSER_PSEUDO_ID,
+  ATTR_USER_ACCOUNT_ID,
+  ATTR_USER_ID,
+} from "../user/constants.js";
 
 let unloadingCount = 0;
 
@@ -88,6 +94,8 @@ export function createTags(
   traceId: string | undefined,
   parentContext: SpanContext | undefined,
   serviceName: unknown,
+  attributes: Attributes,
+  resourceAttributes: Attributes,
 ): Record<string, string> {
   const tags: Record<string, string> = {
     "ai.internal.sdkVersion": `mot${OPENTELEMETRY_BROWSER_VERSION}`,
@@ -97,6 +105,23 @@ export function createTags(
     tags["ai.operation.parentId"] = parentContext.spanId;
   }
   if (serviceName) tags["ai.cloud.role"] = serializeAttribute(serviceName);
+  const anonymousUserId =
+    attributes[ATTR_ENDUSER_PSEUDO_ID] ?? resourceAttributes[ATTR_ENDUSER_PSEUDO_ID];
+  const authenticatedUserId =
+    attributes[ATTR_USER_ID] ??
+    attributes[ATTR_ENDUSER_ID] ??
+    resourceAttributes[ATTR_USER_ID] ??
+    resourceAttributes[ATTR_ENDUSER_ID];
+  const accountId = attributes[ATTR_USER_ACCOUNT_ID] ?? resourceAttributes[ATTR_USER_ACCOUNT_ID];
+  if (anonymousUserId !== undefined) {
+    tags["ai.user.id"] = serializeAttribute(anonymousUserId);
+  }
+  if (authenticatedUserId !== undefined) {
+    tags["ai.user.authUserId"] = serializeAttribute(authenticatedUserId);
+  }
+  if (accountId !== undefined) {
+    tags["ai.user.accountId"] = serializeAttribute(accountId);
+  }
   return tags;
 }
 

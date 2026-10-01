@@ -139,6 +139,15 @@ export interface MicrosoftOpenTelemetryBrowserOptions {
    * Omitted or disabled session tracking does not access session storage or start session timers.
    */
   session?: { enabled?: boolean };
+  /**
+   * Opt-in user identity persistence.
+   *
+   * @remarks
+   * Every initialization creates an anonymous in-memory identity. Set `enabled` to `true` only
+   * when anonymous and authenticated identity may be persisted. Persistence can be changed later
+   * through the returned user context.
+   */
+  userContext?: { enabled?: boolean };
   /** Advanced trace context and propagation configuration. */
   traces?: MicrosoftOpenTelemetryBrowserTraceOptions;
   /** Span processors to register with the tracer provider. An empty array skips trace initialization. */
@@ -177,10 +186,28 @@ export interface MicrosoftOpenTelemetryBrowserOptions {
 }
 
 /**
+ * Mutable user identity context applied to subsequently created spans and logs.
+ * @public
+ */
+export interface MicrosoftOpenTelemetryBrowserUserContext {
+  /**
+   * Sets authenticated identity using OpenTelemetry `user.id` and Azure Monitor
+   * `ai.user.authUserId`. The optional account maps to `ai.user.accountId`.
+   */
+  setAuthenticatedUserContext(userId: string, accountId?: string): void;
+  /** Clears authenticated identity and any persisted authenticated context. */
+  clearAuthenticatedUserContext(): void;
+  /** Enables or disables persistence without changing the current in-memory identity. */
+  setEnabled(enabled: boolean): void;
+}
+
+/**
  * Browser telemetry lifecycle handle.
  * @public
  */
 export interface MicrosoftOpenTelemetryBrowser {
+  /** Mutable user identity and persistence-consent controls. */
+  readonly userContext: MicrosoftOpenTelemetryBrowserUserContext;
   /** Flushes pending trace and log telemetry. */
   forceFlush(): Promise<void>;
   /**

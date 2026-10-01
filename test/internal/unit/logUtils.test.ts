@@ -3,6 +3,7 @@
 
 import type { SpanContext } from "@opentelemetry/api";
 import type { ReadableLogRecord } from "@opentelemetry/sdk-logs";
+import { resourceFromAttributes } from "@opentelemetry/resources";
 import { describe, expect, it } from "vitest";
 import { logToEnvelope } from "../../../src/exporter/logUtils.js";
 import { OPENTELEMETRY_BROWSER_VERSION } from "../../../src/shared/constants.js";
@@ -194,6 +195,24 @@ describe("Azure Monitor log envelope mapping", () => {
         properties: { "url.full": "https://shop.example.test/cart" },
         measurements: { itemCount: 3 },
       },
+    });
+  });
+
+  it("maps resource user attributes to Azure Monitor user tags", () => {
+    const envelope = logToEnvelope(
+      makeLog({
+        resource: resourceFromAttributes({
+          "service.name": "browser-store",
+          "user.id": "signed-in-user",
+          "enduser.pseudo.id": "anonymous-user",
+        }),
+      }),
+      instrumentationKey,
+    );
+
+    expect(envelope.tags).toMatchObject({
+      "ai.user.id": "anonymous-user",
+      "ai.user.authUserId": "signed-in-user",
     });
   });
 

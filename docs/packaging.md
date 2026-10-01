@@ -24,6 +24,14 @@ ESM-aware bundler or native module imports, not a classic script tag expecting a
 CDN publication remains deferred. The `./snippet` helper requires the caller to supply the script
 URL, so it does not claim an unpublished CDN location.
 
+The supplied URL must serve a classic IIFE or UMD script that assigns the distribution's root
+exports to `window.Microsoft.OpenTelemetry`, including `useMicrosoftOpenTelemetry`. The package's
+ESM artifacts are not compatible with the loader and no compatible CDN artifact is published yet.
+Until M2 publishes that artifact, callers can self-host one by bundling an entry that imports the
+package root and assigns its exports to that namespace, with all runtime dependencies included.
+Production snippets should pass the hosted file's `sha384` or stronger digest through `integrity`;
+the loader applies it to the script together with `crossOrigin`.
+
 `npm run test:build` checks the output inventory, package resolution, declaration consumption
 with TypeScript NodeNext and Bundler resolution, source maps, minification, and tree shaking.
 `npm run test:integration` imports both emitted bundles natively in Chromium without a bundler

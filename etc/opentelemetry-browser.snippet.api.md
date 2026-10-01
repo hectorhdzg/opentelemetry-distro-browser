@@ -11,6 +11,7 @@ export function getSdkLoaderScript(config: SdkLoaderConfig): string;
 export interface SdkLoaderConfig {
     readonly connectionString: string;
     readonly crossOrigin?: string;
+    readonly integrity?: string;
     readonly src: string;
 }
 

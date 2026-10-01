@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { diag, trace } from "@opentelemetry/api";
+import { context, diag, trace } from "@opentelemetry/api";
 import { logs } from "@opentelemetry/api-logs";
 import { startBrowserSdk } from "@opentelemetry/browser-sdk";
 import { SessionLogRecordProcessor, SessionSpanProcessor } from "./session/sessionProcessors.js";
@@ -11,17 +11,17 @@ import {
   type BatchLogRecordProcessorBrowserOptions,
 } from "@opentelemetry/sdk-logs";
 import { BatchSpanProcessor } from "@opentelemetry/sdk-trace-base";
-import { setUnloading } from "./exporter/common.js";
+import { beginUnloading, endUnloading } from "./exporter/common.js";
 import { AzureMonitorLogRecordExporter } from "./exporter/log.js";
 import { AzureMonitorSpanExporter } from "./exporter/trace.js";
 import { PageViewInstrumentation } from "./instrumentation/pageView/index.js";
+import { PageViewCorrelation } from "./instrumentation/pageView/pageViewCorrelation.js";
 import {
   ATTR_TELEMETRY_DISTRO_NAME,
   ATTR_TELEMETRY_DISTRO_VERSION,
 } from "@opentelemetry/semantic-conventions";
 import { OPENTELEMETRY_BROWSER_VERSION } from "./shared/constants.js";
 import type {
-  BrowserInstrumentation,
   MicrosoftOpenTelemetryBrowser,
   MicrosoftOpenTelemetryBrowserOptions,
 } from "./types.js";
@@ -43,19 +43,26 @@ import type {
  */
 function createOwnedInstrumentations(
   options: MicrosoftOpenTelemetryBrowserOptions,
-): BrowserInstrumentation[] {
+): PageViewInstrumentation[] {
   if (typeof document === "undefined" || typeof location === "undefined") return [];
 
-  const owned: BrowserInstrumentation[] = [];
+  const owned: PageViewInstrumentation[] = [];
   const pageView = options.pageView ?? {};
   if (pageView.enabled !== false) {
-    owned.push(new PageViewInstrumentation({ ...pageView, enabled: false }));
+    owned.push(
+      new PageViewInstrumentation(
+        { ...pageView, enabled: false },
+        options.traces?.contextManager?.active() ?? context.active(),
+      ),
+    );
   }
   return owned;
 }
 
 /**
  * Restores the session when enabled, then initializes traces, logs, and selected instrumentations.
+ * Captures the initial page operation from the supplied manager or global context before awaiting
+ * session restoration, so synchronous context scopes are preserved.
  * Await completion before emitting telemetry.
  * @public
  */
@@ -85,12 +92,13 @@ export async function useMicrosoftOpenTelemetry(
     : options.logRecordProcessors?.slice();
   const session = options.session?.enabled === true ? createSession() : undefined;
   const traceOptions = options.traces;
-  // Distribution-owned instrumentations come last, so an application-supplied instance observing
-  // the same API is installed first and is disabled last.
-  const instrumentations = [
-    ...(options.instrumentations ?? []),
-    ...createOwnedInstrumentations(options),
-  ];
+  const owned = createOwnedInstrumentations(options);
+  const pageView = owned[0];
+  const correlation = pageView
+    ? new PageViewCorrelation(() => pageView.getOperationContext(), traceOptions?.contextManager)
+    : undefined;
+  // Publish the initial page operation before caller instrumentations can emit.
+  const instrumentations = [...owned, ...(options.instrumentations ?? [])];
   let sdk: ReturnType<typeof startBrowserSdk> | undefined;
   let stopping = false;
   // Upstream stale tracers can still call processors after provider shutdown.
@@ -99,19 +107,20 @@ export async function useMicrosoftOpenTelemetry(
   };
 
   let shutdownPromise: Promise<void> | undefined;
-  let unloading = false;
+  let flushPromise: Promise<void> | undefined;
+  let unloadFlushPromise: Promise<void> | undefined;
   const flushForUnload = (): void => {
-    if (unloading) return;
-    unloading = true;
-    setUnloading(true);
-    void forceFlush()
+    if (unloadFlushPromise) return;
+    beginUnloading();
+    const operation = flushProcessors()
       .catch((error: unknown) => {
         diag.error("Telemetry unload flush failed", error);
       })
       .finally(() => {
-        unloading = false;
-        setUnloading(false);
+        endUnloading();
+        if (unloadFlushPromise === operation) unloadFlushPromise = undefined;
       });
+    unloadFlushPromise = operation;
   };
   const visibilityChange = (): void => {
     if (globalThis.document?.visibilityState === "hidden") flushForUnload();
@@ -119,16 +128,35 @@ export async function useMicrosoftOpenTelemetry(
   globalThis.addEventListener?.("pagehide", flushForUnload);
   globalThis.document?.addEventListener("visibilitychange", visibilityChange);
 
-  async function forceFlush(): Promise<void> {
-    await Promise.all([
-      ...(spanProcessors ?? []).map((processor) => processor.forceFlush()),
-      ...(logRecordProcessors ?? []).map((processor) => processor.forceFlush()),
-    ]);
+  async function flushProcessors(): Promise<void> {
+    const processors = [...(spanProcessors ?? []), ...(logRecordProcessors ?? [])];
+    const results = await Promise.allSettled(
+      processors.map((processor) => Promise.resolve().then(() => processor.forceFlush())),
+    );
+    const errors: unknown[] = [];
+    for (const result of results) {
+      if (result.status === "rejected") errors.push(result.reason);
+    }
+    if (errors.length === 1) throw errors[0];
+    if (errors.length > 1) throw new AggregateError(errors, "Telemetry flush failed");
+  }
+
+  function forceFlush(): Promise<void> {
+    if (shutdownPromise) return shutdownPromise;
+    if (!flushPromise) {
+      const operation = flushProcessors();
+      const tracked = operation.finally(() => {
+        if (flushPromise === tracked) flushPromise = undefined;
+      });
+      flushPromise = tracked;
+    }
+    return flushPromise;
   }
 
   function shutdown(): Promise<void> {
     return (shutdownPromise ??= (async () => {
       stopping = true;
+      void correlation?.shutdown();
       globalThis.removeEventListener?.("pagehide", flushForUnload);
       globalThis.document?.removeEventListener("visibilitychange", visibilityChange);
       const errors: unknown[] = [];
@@ -142,6 +170,15 @@ export async function useMicrosoftOpenTelemetry(
           instrumentations[i].disable();
         } catch (error) {
           errors.push(error);
+        }
+      }
+      const activeFlushes = [flushPromise, unloadFlushPromise].filter(
+        (operation): operation is Promise<void> => operation !== undefined,
+      );
+      if (activeFlushes.length > 0) {
+        const flushResults = await Promise.allSettled(activeFlushes);
+        for (const result of flushResults) {
+          if (result.status === "rejected") errors.push(result.reason);
         }
       }
       try {
@@ -158,6 +195,10 @@ export async function useMicrosoftOpenTelemetry(
 
   try {
     await session?.start();
+    const logContextProcessors = [
+      ...(session ? [new SessionLogRecordProcessor(sessionProvider)] : []),
+      ...(correlation ? [correlation] : []),
+    ];
     sdk = startBrowserSdk({
       // Spread last: the caller's attributes win, and each call gets a fresh object because the
       // SDK mutates this one in place and shares it between the traces and logs SDKs.
@@ -167,9 +208,11 @@ export async function useMicrosoftOpenTelemetry(
         ...options.resource?.attributes,
       },
       traces: {
-        ...(traceOptions?.contextManager === undefined
-          ? {}
-          : { contextManager: traceOptions.contextManager }),
+        ...(correlation
+          ? { contextManager: correlation }
+          : traceOptions?.contextManager === undefined
+            ? {}
+            : { contextManager: traceOptions.contextManager }),
         ...(traceOptions?.propagators === undefined
           ? {}
           : { propagators: traceOptions.propagators.slice() }),
@@ -182,10 +225,12 @@ export async function useMicrosoftOpenTelemetry(
       },
       logs: {
         processors:
-          session && logRecordProcessors?.length !== 0
-            ? [new SessionLogRecordProcessor(sessionProvider), ...(logRecordProcessors ?? [])]
+          logContextProcessors.length && logRecordProcessors?.length !== 0
+            ? [...logContextProcessors, ...(logRecordProcessors ?? [])]
             : logRecordProcessors,
-        ...(session && logRecordProcessors === undefined ? { exportConfig: {} } : {}),
+        ...(logContextProcessors.length && logRecordProcessors === undefined
+          ? { exportConfig: {} }
+          : {}),
       },
     });
     if (instrumentations.length === 0) return handle;

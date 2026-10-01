@@ -141,9 +141,10 @@ function createBatchRequests(
   };
 
   for (const envelope of envelopes) {
+    const separatorSize = batch.length === 0 ? 0 : 1;
     const fittedEnvelope = allowMultipleBatches
       ? envelope
-      : fitEnvelopeCustomFields(envelope, maxBatchSize - 2, encoder);
+      : fitEnvelopeCustomFields(envelope, maxBatchSize - batchSize - separatorSize, encoder);
     const serialized = JSON.stringify(fittedEnvelope);
     const serializedSize = encoder.encode(serialized).byteLength;
     if (!allowMultipleBatches && serializedSize + 2 > maxBatchSize) {
@@ -151,7 +152,6 @@ function createBatchRequests(
         `Envelope size ${serializedSize + 2} exceeds the ${maxBatchSize} byte payload limit.`,
       );
     }
-    const separatorSize = batch.length === 0 ? 0 : 1;
     if (batch.length > 0 && batchSize + separatorSize + serializedSize > maxBatchSize) {
       if (!allowMultipleBatches) {
         throw new RangeError(

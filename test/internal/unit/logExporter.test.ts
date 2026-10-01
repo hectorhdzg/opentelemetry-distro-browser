@@ -125,4 +125,34 @@ describe("AzureMonitorLogRecordExporter", () => {
       endUnloading();
     }
   });
+
+  it("removes custom fields to fit the remaining unload payload budget", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => {
+      throw new TypeError("page unloading");
+    });
+    vi.stubGlobal("fetch", fetch);
+    const sendBeacon = vi.spyOn(navigator, "sendBeacon").mockReturnValue(true);
+    const exporter = new AzureMonitorLogRecordExporter({ connectionString });
+    beginUnloading();
+
+    try {
+      await expect(
+        exportLogs(exporter, [
+          makeLog({ attributes: { payload: "a".repeat(40 * 1024) } }),
+          makeLog({ attributes: { payload: "b".repeat(40 * 1024) } }),
+        ]),
+      ).resolves.toEqual({ code: ExportResultCode.SUCCESS });
+      expect(sendBeacon).toHaveBeenCalledOnce();
+      const body = sendBeacon.mock.calls[0][1] as Blob;
+      expect(body.size).toBeLessThanOrEqual(MAX_BEACON_BODY_SIZE);
+      const envelopes = JSON.parse(await body.text()) as Array<{
+        data: { baseData: { properties?: Record<string, string> } };
+      }>;
+      expect(envelopes).toHaveLength(2);
+      expect(envelopes[0]?.data.baseData.properties?.payload).toHaveLength(40 * 1024);
+      expect(envelopes[1]?.data.baseData.properties?.payload).toBeUndefined();
+    } finally {
+      endUnloading();
+    }
+  });
 });

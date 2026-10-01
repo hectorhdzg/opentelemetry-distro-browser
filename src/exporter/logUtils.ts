@@ -166,13 +166,15 @@ function parseStack(stack: string, maxSizeInBytes: number): readonly StackFrame[
       }
     }
     if (!fileName) continue;
+    const line = Number(location[1]);
+    if (!Number.isSafeInteger(line)) continue;
 
     frames.push({
       level: frames.length,
       method: truncateToLength(method, MAX_STACK_FRAME_FIELD_LENGTH),
       assembly: truncateToLength(trimmed, MAX_STACK_FRAME_FIELD_LENGTH),
       fileName: truncateToLength(fileName, MAX_STACK_FRAME_FIELD_LENGTH),
-      line: Number(location[1]),
+      line,
     });
   }
 

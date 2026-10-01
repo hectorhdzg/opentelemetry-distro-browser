@@ -107,6 +107,7 @@ describe("Azure Monitor log envelope mapping", () => {
       "bundle.js:23:5\n" +
       "src/relative.js:24:6\n" +
       "https://example.test/bootstrap.js:8:3\n" +
+      `invalid.js:${"9".repeat(400)}:1\n` +
       "@https://example.test/anonymous.js:12:4";
     const envelope = logToEnvelope(
       makeLog({

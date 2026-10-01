@@ -124,22 +124,25 @@ it("creates and persists an anonymous identity when enabled without stored state
   expect(JSON.parse(localStorage.getItem(storageKey)!)).toEqual({ anonymousId });
 });
 
-it.each(["", "{malformed-private-payload", "null", '{"anonymousId":""}'])(
-  "replaces invalid stored identity (%j) without logging its contents",
-  async (stored) => {
-    localStorage.setItem(storageKey, stored);
-    const warn = vi.spyOn(diag, "warn").mockImplementation(() => {});
+it.each([
+  "",
+  "{malformed-private-payload",
+  "null",
+  '{"anonymousId":""}',
+  '{"anonymousId":"anonymous","accountId":"tenant"}',
+])("replaces invalid stored identity (%j) without logging its contents", async (stored) => {
+  localStorage.setItem(storageKey, stored);
+  const warn = vi.spyOn(diag, "warn").mockImplementation(() => {});
 
-    const { emit } = await initialize(true);
-    const anonymousId = emit().span.attributes["enduser.pseudo.id"];
+  const { emit } = await initialize(true);
+  const anonymousId = emit().span.attributes["enduser.pseudo.id"];
 
-    expect(anonymousId).toMatch(/^[0-9a-f]{32}$/);
-    expect(JSON.parse(localStorage.getItem(storageKey)!)).toEqual({ anonymousId });
-    expect(warn).toHaveBeenCalledExactlyOnceWith(
-      "Invalid stored user identity; creating a new identity.",
-    );
-  },
-);
+  expect(anonymousId).toMatch(/^[0-9a-f]{32}$/);
+  expect(JSON.parse(localStorage.getItem(storageKey)!)).toEqual({ anonymousId });
+  expect(warn).toHaveBeenCalledExactlyOnceWith(
+    "Invalid stored user identity; creating a new identity.",
+  );
+});
 
 it("uses in-memory identity when localStorage is unavailable", async () => {
   const warn = vi.spyOn(diag, "warn").mockImplementation(() => {});
@@ -150,6 +153,33 @@ it("uses in-memory identity when localStorage is unavailable", async () => {
   expect(emit().span.attributes["enduser.pseudo.id"]).toMatch(/^[0-9a-f]{32}$/);
   expect(warn).toHaveBeenCalledExactlyOnceWith(
     "User storage unavailable; using in-memory identity.",
+  );
+});
+
+it("reports a persistence failure when disabling cannot remove stored identity", async () => {
+  const current = await initialize(true);
+  const warn = vi.spyOn(diag, "warn").mockImplementation(() => {});
+  vi.spyOn(Storage.prototype, "removeItem").mockImplementationOnce(() => {
+    throw new DOMException("denied", "SecurityError");
+  });
+
+  expect(() => current.handle.userContext.setEnabled(false)).toThrow(
+    "Unable to clear persisted user identity.",
+  );
+  expect(warn).toHaveBeenCalledExactlyOnceWith(
+    "User storage unavailable; using in-memory identity.",
+  );
+});
+
+it("reports a persistence failure when sign-out cannot rewrite stored identity", async () => {
+  const current = await initialize(true);
+  current.handle.userContext.setAuthenticatedUserContext("signed-in-user");
+  vi.spyOn(Storage.prototype, "setItem").mockImplementationOnce(() => {
+    throw new DOMException("denied", "SecurityError");
+  });
+
+  expect(() => current.handle.userContext.clearAuthenticatedUserContext()).toThrow(
+    "Unable to clear persisted user identity.",
   );
 });
 

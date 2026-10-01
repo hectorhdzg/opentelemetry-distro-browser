@@ -24,10 +24,11 @@ function isNonEmptyString(value: unknown): value is string {
 function isStoredUser(value: unknown): value is StoredUser {
   if (typeof value !== "object" || value === null || !("anonymousId" in value)) return false;
   const user = value as Partial<StoredUser>;
+  const hasAuthenticatedUser = user.authenticatedUserId !== undefined;
   return (
     isNonEmptyString(user.anonymousId) &&
-    (user.authenticatedUserId === undefined || isNonEmptyString(user.authenticatedUserId)) &&
-    (user.accountId === undefined || isNonEmptyString(user.accountId))
+    (!hasAuthenticatedUser || isNonEmptyString(user.authenticatedUserId)) &&
+    (user.accountId === undefined || (hasAuthenticatedUser && isNonEmptyString(user.accountId)))
   );
 }
 
@@ -60,14 +61,23 @@ export function createUserContext(
     };
   }
 
-  function save(): void {
-    if (!enabled) return;
-    storage.setItem(storageKey, JSON.stringify(currentUser()));
+  function save(): boolean {
+    if (!enabled) return true;
+    return storage.setItem(storageKey, JSON.stringify(currentUser()));
+  }
+
+  function requireIdentityCleared(cleared: boolean): void {
+    if (!cleared) {
+      throw new Error("Unable to clear persisted user identity.");
+    }
   }
 
   function clearPersistedAuthenticatedContext(): void {
     const stored = storage.getItem(storageKey);
-    if (stored === null) return;
+    if (stored === null) {
+      requireIdentityCleared(storage.removeItem(storageKey));
+      return;
+    }
     let parsed: unknown;
     try {
       parsed = JSON.parse(stored);
@@ -75,9 +85,11 @@ export function createUserContext(
       if (!(error instanceof SyntaxError)) throw error;
     }
     if (isStoredUser(parsed)) {
-      storage.setItem(storageKey, JSON.stringify({ anonymousId: parsed.anonymousId }));
+      requireIdentityCleared(
+        storage.setItem(storageKey, JSON.stringify({ anonymousId: parsed.anonymousId })),
+      );
     } else {
-      storage.removeItem(storageKey);
+      requireIdentityCleared(storage.removeItem(storageKey));
     }
   }
 
@@ -119,17 +131,18 @@ export function createUserContext(
       authenticatedUserId = undefined;
       accountId = undefined;
       if (enabled) {
-        save();
+        requireIdentityCleared(save());
       } else {
         clearPersistedAuthenticatedContext();
       }
     },
     setEnabled(newEnabled) {
-      enabled = newEnabled;
       if (newEnabled) {
+        enabled = true;
         save();
       } else {
-        storage.removeItem(storageKey);
+        requireIdentityCleared(storage.removeItem(storageKey));
+        enabled = false;
       }
     },
   };

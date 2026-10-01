@@ -11,8 +11,8 @@ import { diag } from "@opentelemetry/api";
  */
 export interface KeyValueStorage {
   getItem(key: string): string | null;
-  setItem(key: string, value: string): void;
-  removeItem(key: string): void;
+  setItem(key: string, value: string): boolean;
+  removeItem(key: string): boolean;
 }
 
 export function createLocalStorageKeyValueStorage(unavailableMessage: string): KeyValueStorage {
@@ -37,7 +37,15 @@ export function createLocalStorageKeyValueStorage(unavailableMessage: string): K
 
   return {
     getItem: (key) => useStorage((storage) => storage.getItem(key), null),
-    setItem: (key, value) => useStorage((storage) => storage.setItem(key, value), undefined),
-    removeItem: (key) => useStorage((storage) => storage.removeItem(key), undefined),
+    setItem: (key, value) =>
+      useStorage((storage) => {
+        storage.setItem(key, value);
+        return true;
+      }, false),
+    removeItem: (key) =>
+      useStorage((storage) => {
+        storage.removeItem(key);
+        return true;
+      }, false),
   };
 }

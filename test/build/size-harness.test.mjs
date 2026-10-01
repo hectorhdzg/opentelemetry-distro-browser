@@ -25,7 +25,7 @@ const instrumentationIds = [
 ];
 
 test("covers every published JavaScript entry point and browser instrumentation", () => {
-  assert.deepEqual(executablePublishedEntryPoints.sort(), [".", "./instrumentations"]);
+  assert.deepEqual(executablePublishedEntryPoints.sort(), [".", "./instrumentations", "./snippet"]);
   assert.deepEqual(
     scenarios
       .filter(({ group }) => group === "entry-point")

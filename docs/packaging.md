@@ -9,6 +9,8 @@ require ES2022 ESM-only output. `npm run build` cleans previous artifacts and em
 | `dist/esm/index.min.js`  | Minified ESM bundle for browser size checks |
 | `dist/esm/index.d.ts`    | Public TypeScript declarations              |
 | `dist/esm/index*.js.map` | Source maps with embedded source content    |
+| `dist/esm/snippet.js`    | Configurable SDK loader snippet generator   |
+| `dist/esm/snippet.d.ts`  | Loader snippet TypeScript declarations      |
 
 Import the package through its `exports` map. The manifest intentionally has no `main` or
 `module` field and no CommonJS `require` condition. CommonJS consumers must use asynchronous
@@ -18,7 +20,8 @@ metadata subpath remains available.
 There is no CommonJS build, `.d.cts` declaration, IIFE bundle, or `OpenTelemetryBrowser` global.
 The former `dist/commonjs/` and `dist/browser/` outputs are removed. Browser consumers use an
 ESM-aware bundler or native module imports, not a classic script tag expecting a global.
-CDN publication and loader policy remain deferred in the implementation plan.
+CDN publication remains deferred. The `./snippet` helper requires the caller to supply the script
+URL, so it does not claim an unpublished CDN location.
 
 `npm run test:build` checks the output inventory, package resolution, declaration consumption
 with TypeScript NodeNext and Bundler resolution, source maps, minification, and tree shaking.

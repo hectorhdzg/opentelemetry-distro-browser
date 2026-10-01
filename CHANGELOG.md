@@ -8,6 +8,8 @@ All notable changes to this package are documented in this file.
 
 - Promote the size harness into a repository tool
 - Map page view ID and referrer to Azure Monitor envelopes
+- Add browser user context with anonymous and authenticated identities, opt-in persistence,
+  sign-out controls, OpenTelemetry enrichment, and Azure Monitor `ai.user.*` mapping.
 
 ### Changed
 

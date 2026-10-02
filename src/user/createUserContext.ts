@@ -80,8 +80,11 @@ export function createUserContext(
 
   function clearPersistedAuthenticatedContext(): void {
     const result = storage.getItem(storageKey);
-    requireIdentityCleared(result.success);
-    if (!result.success || result.value === null) return;
+    if (!result.success) {
+      requireIdentityCleared(storage.removeItem(storageKey));
+      return;
+    }
+    if (result.value === null) return;
     let parsed: unknown;
     try {
       parsed = JSON.parse(result.value);

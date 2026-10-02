@@ -26,6 +26,10 @@ export function endUnloading(): void {
   unloadingCount = Math.max(0, unloadingCount - 1);
 }
 
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0;
+}
+
 export function hrTimeToMilliseconds(hrTime: HrTime): number {
   return hrTime[0] * 1_000 + hrTime[1] / 1_000_000;
 }
@@ -113,14 +117,14 @@ export function createTags(
     resourceAttributes[ATTR_ENDUSER_ID] ??
     resourceAttributes[ATTR_USER_ID];
   const accountId = attributes[ATTR_USER_ACCOUNT_ID] ?? resourceAttributes[ATTR_USER_ACCOUNT_ID];
-  if (anonymousUserId !== undefined) {
-    tags["ai.user.id"] = serializeAttribute(anonymousUserId);
+  if (isNonEmptyString(anonymousUserId)) {
+    tags["ai.user.id"] = anonymousUserId;
   }
-  if (authenticatedUserId !== undefined) {
-    tags["ai.user.authUserId"] = serializeAttribute(authenticatedUserId);
+  if (isNonEmptyString(authenticatedUserId)) {
+    tags["ai.user.authUserId"] = authenticatedUserId;
   }
-  if (accountId !== undefined) {
-    tags["ai.user.accountId"] = serializeAttribute(accountId);
+  if (isNonEmptyString(accountId)) {
+    tags["ai.user.accountId"] = accountId;
   }
   return tags;
 }

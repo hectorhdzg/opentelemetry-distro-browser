@@ -237,6 +237,23 @@ it("does not remove an absent persisted identity", async () => {
   expect(remove).not.toHaveBeenCalled();
 });
 
+it("removes persisted identity after a transient read failure", async () => {
+  localStorage.setItem(
+    storageKey,
+    JSON.stringify({
+      anonymousId: "persisted-anonymous",
+      authenticatedUserId: "signed-in-user",
+    }),
+  );
+  const current = await initialize();
+  vi.spyOn(Storage.prototype, "getItem").mockImplementationOnce(() => {
+    throw { name: "SecurityError" };
+  });
+
+  expect(() => current.handle.userContext.clearAuthenticatedUserContext()).not.toThrow();
+  expect(localStorage.getItem(storageKey)).toBeNull();
+});
+
 it("can remove persisted identity after a quota-limited write", async () => {
   const current = await initialize(true);
   const warn = vi.spyOn(diag, "warn").mockImplementation(() => {});

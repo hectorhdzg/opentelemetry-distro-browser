@@ -40,13 +40,17 @@ export function createLocalStorageKeyValueStorage(unavailableMessage: string): K
         return result;
       }
     } catch (error) {
-      if (
-        !(error instanceof Error) ||
-        (error.name !== "SecurityError" && error.name !== "QuotaExceededError")
-      ) {
+      const errorName =
+        typeof error === "object" &&
+        error !== null &&
+        "name" in error &&
+        typeof error.name === "string"
+          ? error.name
+          : undefined;
+      if (errorName !== "SecurityError" && errorName !== "QuotaExceededError") {
         throw error;
       }
-      if (operationType === "write" && error.name === "QuotaExceededError") {
+      if (operationType === "write" && errorName === "QuotaExceededError") {
         writesUnavailable = true;
       }
     }

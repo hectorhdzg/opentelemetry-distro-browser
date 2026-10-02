@@ -7,6 +7,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { beginUnloading, endUnloading } from "../../../src/exporter/common.js";
 import { MAX_BEACON_BODY_SIZE } from "../../../src/exporter/constants.js";
 import { AzureMonitorLogRecordExporter } from "../../../src/exporter/log.js";
+import { createMockIngestionEndpoint } from "../../fixtures/azureMonitor.js";
+import { createReadableLogRecord } from "../../fixtures/telemetry.js";
 
 const connectionString =
   "InstrumentationKey=00000000-0000-0000-0000-000000000000;IngestionEndpoint=https://example.test";
@@ -14,19 +16,6 @@ const connectionString =
 afterEach(() => {
   vi.unstubAllGlobals();
 });
-
-function makeLog(overrides: Partial<ReadableLogRecord> = {}): ReadableLogRecord {
-  return {
-    hrTime: [1_735_689_600, 0],
-    hrTimeObserved: [1_735_689_600, 0],
-    body: "checkout completed",
-    resource: { attributes: {} },
-    instrumentationScope: { name: "test" },
-    attributes: {},
-    droppedAttributesCount: 0,
-    ...overrides,
-  } as unknown as ReadableLogRecord;
-}
 
 function exportLogs(
   exporter: AzureMonitorLogRecordExporter,
@@ -37,14 +26,25 @@ function exportLogs(
 
 describe("AzureMonitorLogRecordExporter", () => {
   it("maps and exports log records", async () => {
-    const fetch = vi.fn<typeof globalThis.fetch>(async () => new Response("", { status: 200 }));
-    vi.stubGlobal("fetch", fetch);
-    const exporter = new AzureMonitorLogRecordExporter({ connectionString });
+    const ingestion = createMockIngestionEndpoint();
+    vi.stubGlobal("fetch", ingestion.fetch);
+    const exporter = new AzureMonitorLogRecordExporter({
+      connectionString: ingestion.connectionString,
+    });
 
-    const result = await exportLogs(exporter, [makeLog()]);
-
-    expect(result).toEqual({ code: ExportResultCode.SUCCESS });
-    expect(fetch).toHaveBeenCalledOnce();
+    try {
+      const result = await new Promise<{ code: ExportResultCode }>((resolve) => {
+        exporter.export([createReadableLogRecord({ body: "checkout completed" })], resolve);
+      });
+      await exporter.forceFlush();
+      expect(result).toEqual({ code: ExportResultCode.SUCCESS });
+      expect(ingestion.fetch).toHaveBeenCalledOnce();
+      expect(ingestion.requests[0].envelopes[0]).toMatchObject({
+        data: { baseType: "MessageData", baseData: { message: "checkout completed" } },
+      });
+    } finally {
+      await exporter.shutdown();
+    }
   });
 
   it("rejects unload exports that exceed the aggregate beacon body limit", async () => {
@@ -54,7 +54,7 @@ describe("AzureMonitorLogRecordExporter", () => {
     vi.stubGlobal("fetch", fetch);
     const sendBeacon = vi.spyOn(navigator, "sendBeacon").mockReturnValue(true);
     const exporter = new AzureMonitorLogRecordExporter({ connectionString });
-    const largeException = makeLog({
+    const largeException = createReadableLogRecord({
       eventName: "exception",
       attributes: {
         "exception.message": "Large exception",
@@ -69,7 +69,10 @@ describe("AzureMonitorLogRecordExporter", () => {
 
     try {
       await expect(
-        exportLogs(exporter, [largeException, makeLog({ body: "x".repeat(10 * 1024) })]),
+        exportLogs(exporter, [
+          largeException,
+          createReadableLogRecord({ body: "x".repeat(10 * 1024) }),
+        ]),
       ).resolves.toMatchObject({ code: ExportResultCode.FAILED });
       expect(fetch).not.toHaveBeenCalled();
       expect(sendBeacon).not.toHaveBeenCalled();
@@ -90,7 +93,7 @@ describe("AzureMonitorLogRecordExporter", () => {
     try {
       await expect(
         exportLogs(exporter, [
-          makeLog({
+          createReadableLogRecord({
             eventName: "exception",
             attributes: {
               "exception.message": "Large custom field",
@@ -138,8 +141,8 @@ describe("AzureMonitorLogRecordExporter", () => {
     try {
       await expect(
         exportLogs(exporter, [
-          makeLog({ attributes: { payload: "a".repeat(40 * 1024) } }),
-          makeLog({ attributes: { payload: "b".repeat(40 * 1024) } }),
+          createReadableLogRecord({ attributes: { payload: "a".repeat(40 * 1024) } }),
+          createReadableLogRecord({ attributes: { payload: "b".repeat(40 * 1024) } }),
         ]),
       ).resolves.toEqual({ code: ExportResultCode.SUCCESS });
       expect(sendBeacon).toHaveBeenCalledOnce();

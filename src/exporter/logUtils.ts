@@ -62,7 +62,7 @@ const MAX_EXCEPTION_STACK_LENGTH = 32 * 1024;
 const MAX_EXCEPTION_STACK_SIZE_IN_BYTES = 32 * 1024;
 const MAX_PARSED_STACK_SIZE_IN_BYTES = 32 * 1024;
 const MAX_STACK_FRAME_FIELD_LENGTH = 1024;
-// Exception envelopes must remain independently deliverable through the unload beacon transport.
+// Preserve core exception data within unload limits before optional custom fields are fitted.
 const MAX_EXCEPTION_ENVELOPE_SIZE_IN_BYTES = MAX_BEACON_BODY_SIZE;
 let textEncoder: TextEncoder | undefined;
 

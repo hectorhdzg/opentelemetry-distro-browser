@@ -141,6 +141,7 @@ function createBatchRequests(
   };
 
   for (const envelope of envelopes) {
+    // Normal-export batch size is a split threshold; ingestion reports oversized item failures.
     const separatorSize = batch.length === 0 ? 0 : 1;
     const fittedEnvelope = allowMultipleBatches
       ? envelope

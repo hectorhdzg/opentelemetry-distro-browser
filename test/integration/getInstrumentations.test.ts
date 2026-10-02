@@ -107,6 +107,7 @@ function expectW3cHeaders(headers: PropagationHeaders): void {
 }
 
 async function captured(expectedCount = 0): Promise<ReadableSpan[]> {
+  // Exact counts intentionally detect unexpected telemetry from the configured instrumentations.
   await vi.waitFor(async () => {
     await pipeline.spanProcessor.forceFlush();
     expect(pipeline.spanExporter.getFinishedSpans()).toHaveLength(expectedCount);

@@ -70,6 +70,37 @@ function getInstrumentationBundle(): InstrumentationBundle | undefined {
   return window.Microsoft?.OpenTelemetryInstrumentations;
 }
 
+function createAmdBundle<T>(file: string): {
+  bundle: Promise<T>;
+  cancelTimeout: () => void;
+  define: AmdDefine;
+} {
+  let resolveBundle!: (bundle: T) => void;
+  let timeout = 0;
+  const bundle = new Promise<T>((resolve, reject) => {
+    timeout = window.setTimeout(() => reject(new Error(`${file} did not call AMD define`)), 1_000);
+    resolveBundle = (value) => {
+      clearTimeout(timeout);
+      resolve(value);
+    };
+  });
+  const define: AmdDefine = (dependencies, factory) => {
+    expect(dependencies).toEqual(["exports"]);
+    const exports = {};
+    factory(exports);
+    resolveBundle(exports as unknown as T);
+  };
+  define.amd = {};
+  return {
+    bundle,
+    cancelTimeout: () => {
+      void bundle.catch(() => undefined);
+      clearTimeout(timeout);
+    },
+    define,
+  };
+}
+
 async function exercise(bundle: BrowserBundle): Promise<void> {
   const pipeline = createInMemoryPipeline();
   const telemetry = await bundle.useMicrosoftOpenTelemetry({
@@ -123,17 +154,7 @@ it.each(["opentelemetry-browser.umd.js", "opentelemetry-browser.umd.min.js"])(
   "loads and initializes the %s bundle through AMD/RequireJS",
   async (file) => {
     const originalDefine = window.define;
-    let resolveBundle!: (bundle: BrowserBundle) => void;
-    const bundle = new Promise<BrowserBundle>((resolve) => {
-      resolveBundle = resolve;
-    });
-    const define: AmdDefine = (dependencies, factory) => {
-      expect(dependencies).toEqual(["exports"]);
-      const exports = {};
-      factory(exports);
-      resolveBundle(exports as unknown as BrowserBundle);
-    };
-    define.amd = {};
+    const { bundle, cancelTimeout, define } = createAmdBundle<BrowserBundle>(file);
     window.define = define;
 
     let script: HTMLScriptElement | undefined;
@@ -141,6 +162,7 @@ it.each(["opentelemetry-browser.umd.js", "opentelemetry-browser.umd.min.js"])(
       script = await loadScript(file);
       await exercise(await bundle);
     } finally {
+      cancelTimeout();
       script?.remove();
       window.define = originalDefine;
     }
@@ -175,17 +197,7 @@ it.each([
   "opentelemetry-browser-instrumentations.umd.min.js",
 ])("loads the %s instrumentation bundle through AMD/RequireJS", async (file) => {
   const originalDefine = window.define;
-  let resolveBundle!: (bundle: InstrumentationBundle) => void;
-  const bundle = new Promise<InstrumentationBundle>((resolve) => {
-    resolveBundle = resolve;
-  });
-  const define: AmdDefine = (dependencies, factory) => {
-    expect(dependencies).toEqual(["exports"]);
-    const exports = {};
-    factory(exports);
-    resolveBundle(exports as unknown as InstrumentationBundle);
-  };
-  define.amd = {};
+  const { bundle, cancelTimeout, define } = createAmdBundle<InstrumentationBundle>(file);
   window.define = define;
 
   let script: HTMLScriptElement | undefined;
@@ -200,6 +212,7 @@ it.each([
       }),
     ).toEqual([]);
   } finally {
+    cancelTimeout();
     script?.remove();
     window.define = originalDefine;
   }

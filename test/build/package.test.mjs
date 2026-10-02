@@ -225,7 +225,7 @@ test("the only initializer is a distro-owned wrapper", async () => {
   ]);
 });
 
-test("the root ESM initializer exports both traces and logs", async () => {
+test("the root ESM initializer configures both traces and logs", async () => {
   const distro = await import(pkg.name);
   assert.equal(distro.OPENTELEMETRY_BROWSER_VERSION, pkg.version);
   await exerciseNpmPackage(distro);
@@ -401,7 +401,7 @@ test("the minified artifact keeps both API packages external", async () => {
   }
 });
 
-test("the CommonJS initializer exports both traces and logs", async () => {
+test("the CommonJS initializer configures both traces and logs", async () => {
   const distro = require(pkg.name);
   assert.equal(distro.OPENTELEMETRY_BROWSER_VERSION, pkg.version);
   await exerciseNpmPackage(distro);

@@ -63,7 +63,7 @@ export default defineConfig([
     },
   },
   {
-    files: ["**/*.ts"],
+    files: ["**/*.{ts,cts,mts}"],
     rules: {
       "@typescript-eslint/no-unused-vars": [
         "error",

@@ -62,7 +62,6 @@ const MAX_EXCEPTION_STACK_LENGTH = 32 * 1024;
 const MAX_EXCEPTION_STACK_SIZE_IN_BYTES = 32 * 1024;
 const MAX_PARSED_STACK_SIZE_IN_BYTES = 32 * 1024;
 const MAX_STACK_FRAME_FIELD_LENGTH = 1024;
-const PARSED_STACK_PROPERTY_SIZE_IN_BYTES = 15;
 let textEncoder: TextEncoder | undefined;
 
 function isPageView(eventName: string | undefined): boolean {
@@ -273,8 +272,7 @@ export function logToEnvelope(
     const availableStringSize =
       maxExceptionSize -
       getUtf8Size(JSON.stringify(exceptionWithEmptyStrings)) +
-      emptyStringSize * (schemaLimitedStack === undefined ? 1 : 2) -
-      (schemaLimitedStack === undefined ? 0 : PARSED_STACK_PROPERTY_SIZE_IN_BYTES + 2);
+      emptyStringSize * (schemaLimitedStack === undefined ? 1 : 2);
     const stackSize =
       schemaLimitedStack === undefined
         ? 0
@@ -300,9 +298,7 @@ export function logToEnvelope(
     };
     const parsedStackSize = Math.min(
       MAX_PARSED_STACK_SIZE_IN_BYTES,
-      maxExceptionSize -
-        getUtf8Size(JSON.stringify(exception)) -
-        PARSED_STACK_PROPERTY_SIZE_IN_BYTES,
+      maxExceptionSize - getUtf8Size(JSON.stringify(exception)) - getUtf8Size(',"parsedStack":'),
     );
     const parsedStack =
       serializedStack === undefined || parsedStackSize < 2

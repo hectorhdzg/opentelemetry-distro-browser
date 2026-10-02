@@ -345,6 +345,27 @@ describe("Azure Monitor log envelope mapping", () => {
     expect(parsedStack.length).toBeLessThan(700);
   });
 
+  it("uses the full exception budget when a stack has no parsable frames", () => {
+    const envelope = logToEnvelope(
+      makeLog({
+        eventName: "exception",
+        attributes: {
+          "exception.message": "m".repeat(32 * 1024),
+          "exception.stacktrace": "s".repeat(32 * 1024),
+        },
+      }),
+      instrumentationKey,
+    );
+    const exception = (envelope.data.baseData as ExceptionData).exceptions[0];
+    const size = new TextEncoder().encode(JSON.stringify([envelope])).byteLength;
+
+    expect(exception.parsedStack).toBeUndefined();
+    expect(size).toBeGreaterThan(
+      MAX_BEACON_BODY_SIZE - new TextEncoder().encode(',"parsedStack":[]').byteLength,
+    );
+    expect(size).toBeLessThanOrEqual(MAX_BEACON_BODY_SIZE);
+  });
+
   it("limits parsed stack frame fields to Azure Monitor schema lengths", () => {
     const method = "m".repeat(1100);
     const fileName = `${"path/".repeat(220)}app.js`;

@@ -12,7 +12,7 @@ import {
 import { logs } from "@opentelemetry/api-logs";
 import type { ReadableLogRecord } from "@opentelemetry/sdk-logs";
 import type { ReadableSpan } from "@opentelemetry/sdk-trace-base";
-import { afterEach, describe, expect, inject, it } from "vitest";
+import { afterEach, describe, expect, inject, it, vi } from "vitest";
 import { useMicrosoftOpenTelemetry } from "../../src/index.js";
 import { getInstrumentations } from "../../src/instrumentation/browserInstrumentation/index.js";
 import type {
@@ -106,16 +106,19 @@ function expectW3cHeaders(headers: PropagationHeaders): void {
   expect(headers.baggage).toBe("tenant.id=contoso");
 }
 
-/** Waits for the exporter to settle, then returns whatever was captured. */
-async function captured(): Promise<ReadableSpan[]> {
-  await new Promise((resolve) => setTimeout(resolve, 50));
-  await pipeline.spanProcessor.forceFlush();
+async function captured(expectedCount = 0): Promise<ReadableSpan[]> {
+  await vi.waitFor(async () => {
+    await pipeline.spanProcessor.forceFlush();
+    expect(pipeline.spanExporter.getFinishedSpans()).toHaveLength(expectedCount);
+  });
   return pipeline.spanExporter.getFinishedSpans();
 }
 
-async function capturedLogs(): Promise<ReadableLogRecord[]> {
-  await new Promise((resolve) => setTimeout(resolve, 50));
-  await pipeline.logProcessor.forceFlush();
+async function capturedLogs(expectedCount: number): Promise<ReadableLogRecord[]> {
+  await vi.waitFor(async () => {
+    await pipeline.logProcessor.forceFlush();
+    expect(pipeline.logExporter.getFinishedLogRecords()).toHaveLength(expectedCount);
+  });
   return pipeline.logExporter.getFinishedLogRecords();
 }
 
@@ -139,7 +142,7 @@ describe("configured instrumentations in a browser", () => {
     await request(APPLICATION_URL);
     await sendXhr(APPLICATION_URL);
 
-    const spans = await captured();
+    const spans = await captured(2);
     expect(spans).toHaveLength(2);
     expect(urlsOf(spans)).toEqual([APPLICATION_URL, APPLICATION_URL]);
   });
@@ -165,7 +168,7 @@ describe("configured instrumentations in a browser", () => {
 
     await request(APPLICATION_URL);
 
-    const spans = await captured();
+    const spans = await captured(1);
     expect(spans).toHaveLength(1);
     expect(urlsOf(spans)).toEqual([APPLICATION_URL]);
   });
@@ -175,7 +178,7 @@ describe("configured instrumentations in a browser", () => {
 
     await sendXhr(APPLICATION_URL);
 
-    const spans = await captured();
+    const spans = await captured(1);
     expect(spans).toHaveLength(1);
     expect(urlsOf(spans)).toEqual([APPLICATION_URL]);
   });
@@ -204,21 +207,24 @@ describe("configured instrumentations in a browser", () => {
 
     window.dispatchEvent(new ErrorEvent("error", { message: "Script error." }));
 
-    const records = (await capturedLogs()).filter((record) => record.eventName === "exception");
+    const records = (await capturedLogs(3)).filter((record) => record.eventName === "exception");
     expect(records).toHaveLength(3);
-    expect(records[0]?.attributes).toMatchObject({
+    const recordsByKind = new Map(
+      records.map((record) => [record.attributes["test.error_kind"], record]),
+    );
+    expect(recordsByKind.get("TypeError")?.attributes).toMatchObject({
       "exception.type": "TypeError",
       "exception.message": "checkout failed",
       "exception.stacktrace": thrown.stack,
       "test.error_kind": "TypeError",
     });
-    expect(records[1]?.attributes).toMatchObject({
+    expect(recordsByKind.get("Error")?.attributes).toMatchObject({
       "exception.type": "Error",
       "exception.message": "payment rejected",
       "exception.stacktrace": rejected.stack,
       "test.error_kind": "Error",
     });
-    expect(records[2]?.attributes).toMatchObject({
+    expect(recordsByKind.get("message")?.attributes).toMatchObject({
       "exception.message": "Script error.",
       "test.error_kind": "message",
     });
@@ -252,7 +258,7 @@ describe("configured instrumentations in a browser", () => {
 
       expectW3cHeaders(fetchRequest);
       expectW3cHeaders(xhrRequest);
-      const spans = await captured();
+      const spans = await captured(3);
       expect(spans).toHaveLength(3);
       for (const headers of [fetchRequest, xhrRequest]) {
         const requestSpan = spans.find(
@@ -355,7 +361,7 @@ describe("configured instrumentations in a browser", () => {
 
       await request(`${APPLICATION_URL}?token=secret`);
 
-      expect(urlsOf(await captured())).toEqual(["https://sanitized.example.test/"]);
+      expect(urlsOf(await captured(1))).toEqual(["https://sanitized.example.test/"]);
     });
 
     it("invokes a caller requestHook and applyCustomAttributesOnSpan", async () => {
@@ -376,7 +382,7 @@ describe("configured instrumentations in a browser", () => {
 
       await request(APPLICATION_URL);
 
-      const spans = await captured();
+      const spans = await captured(1);
       expect(seen).toEqual(["requestHook", "applyCustomAttributesOnSpan"]);
       expect(spans[0]?.attributes["test.request_hook"]).toBe(true);
       expect(spans[0]?.attributes["test.custom_attributes"]).toBe(true);

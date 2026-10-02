@@ -9,7 +9,7 @@ All notable changes to this package are documented in this file.
 - Promote the size harness into a repository tool
 - Add a configurable SDK loader snippet generator that requires an explicit browser bundle URL.
 - Map page view ID and referrer to Azure Monitor envelopes
-- Added parsed JavaScript stack frames to Azure Monitor browser exception telemetry while
+- Add parsed JavaScript stack frames to Azure Monitor browser exception telemetry while
   preserving the original stack trace.
 - Add an interactive storefront sample with local span and log exporters and a built-in telemetry
   viewer.

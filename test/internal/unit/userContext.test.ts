@@ -183,6 +183,25 @@ it("reports a persistence failure when sign-out cannot rewrite stored identity",
   );
 });
 
+it("reports a persistence failure when authenticated identity cannot be saved", async () => {
+  const current = await initialize(true);
+  vi.spyOn(Storage.prototype, "setItem").mockImplementationOnce(() => {
+    throw new DOMException("full", "QuotaExceededError");
+  });
+
+  expect(() => current.handle.userContext.setAuthenticatedUserContext("signed-in-user")).toThrow(
+    "Unable to persist user identity.",
+  );
+});
+
+it("does not remove an absent persisted identity", async () => {
+  const current = await initialize();
+  const remove = vi.spyOn(Storage.prototype, "removeItem");
+
+  expect(() => current.handle.userContext.clearAuthenticatedUserContext()).not.toThrow();
+  expect(remove).not.toHaveBeenCalled();
+});
+
 it("can remove persisted identity after a quota-limited write", async () => {
   const current = await initialize(true);
   const warn = vi.spyOn(diag, "warn").mockImplementation(() => {});
@@ -191,7 +210,9 @@ it("can remove persisted identity after a quota-limited write", async () => {
   });
   const remove = vi.spyOn(Storage.prototype, "removeItem");
 
-  current.handle.userContext.setAuthenticatedUserContext("signed-in-user");
+  expect(() => current.handle.userContext.setAuthenticatedUserContext("signed-in-user")).toThrow(
+    "Unable to persist user identity.",
+  );
   expect(() => current.handle.userContext.setEnabled(false)).not.toThrow();
 
   expect(remove).toHaveBeenCalledWith(storageKey);

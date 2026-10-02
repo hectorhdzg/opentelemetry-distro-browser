@@ -21,11 +21,11 @@ function createDefaultStore(storage: KeyValueStorage) {
   const store: SessionStore = {
     get() {
       // The upstream store collapses malformed JSON and stored null into an absent key.
-      const stored = storage.getItem(storageKey);
-      if (stored === null) return Promise.resolve(null);
+      const result = storage.getItem(storageKey);
+      if (!result.success || result.value === null) return Promise.resolve(null);
       let session: unknown;
       try {
-        session = JSON.parse(stored);
+        session = JSON.parse(result.value);
       } catch (error) {
         if (!(error instanceof SyntaxError)) throw error;
       }

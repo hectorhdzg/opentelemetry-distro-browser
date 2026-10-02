@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 import { SpanKind, SpanStatusCode, type SpanContext } from "@opentelemetry/api";
+import { resourceFromAttributes } from "@opentelemetry/resources";
 import type { ReadableSpan } from "@opentelemetry/sdk-trace-base";
 import { describe, expect, it } from "vitest";
 import { spanToEnvelope } from "../../../src/exporter/spanUtils.js";
@@ -127,6 +128,20 @@ describe("Azure Monitor span envelope mapping", () => {
 
     expect(envelope.tags["ai.user.authUserId"]).toBe("application-user");
     expect(envelope.data.baseData.properties).toBeUndefined();
+  });
+
+  it("uses the same authenticated user precedence for resource attributes", () => {
+    const envelope = spanToEnvelope(
+      makeSpan({
+        resource: resourceFromAttributes({
+          "user.id": "managed-user",
+          "enduser.id": "application-user",
+        }),
+      }),
+      instrumentationKey,
+    );
+
+    expect(envelope.tags["ai.user.authUserId"]).toBe("application-user");
   });
 
   it("maps a server span to RequestData", () => {

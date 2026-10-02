@@ -3,6 +3,8 @@
 
 import { diag } from "@opentelemetry/api";
 
+type StorageReadResult = { success: true; value: string | null } | { success: false };
+
 /**
  * Minimal persistence contract shared by browser context managers.
  *
@@ -10,7 +12,7 @@ import { diag } from "@opentelemetry/api";
  * code. Values remain owned and serialized by each manager.
  */
 export interface KeyValueStorage {
-  getItem(key: string): string | null;
+  getItem(key: string): StorageReadResult;
   setItem(key: string, value: string): boolean;
   removeItem(key: string): boolean;
 }
@@ -57,7 +59,12 @@ export function createLocalStorageKeyValueStorage(unavailableMessage: string): K
   }
 
   return {
-    getItem: (key) => useStorage((storage) => storage.getItem(key), null, "read"),
+    getItem: (key) =>
+      useStorage<StorageReadResult>(
+        (storage) => ({ success: true as const, value: storage.getItem(key) }),
+        { success: false as const },
+        "read",
+      ),
     setItem: (key, value) =>
       useStorage(
         (storage) => {

@@ -72,15 +72,19 @@ export function createUserContext(
     }
   }
 
-  function clearPersistedAuthenticatedContext(): void {
-    const stored = storage.getItem(storageKey);
-    if (stored === null) {
-      requireIdentityCleared(storage.removeItem(storageKey));
-      return;
+  function requireIdentityPersisted(persisted: boolean): void {
+    if (!persisted) {
+      throw new Error("Unable to persist user identity.");
     }
+  }
+
+  function clearPersistedAuthenticatedContext(): void {
+    const result = storage.getItem(storageKey);
+    requireIdentityCleared(result.success);
+    if (!result.success || result.value === null) return;
     let parsed: unknown;
     try {
-      parsed = JSON.parse(stored);
+      parsed = JSON.parse(result.value);
     } catch (error) {
       if (!(error instanceof SyntaxError)) throw error;
     }
@@ -94,23 +98,25 @@ export function createUserContext(
   }
 
   if (enabled) {
-    const stored = storage.getItem(storageKey);
-    if (stored === null) {
-      save();
-    } else {
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(stored);
-      } catch (error) {
-        if (!(error instanceof SyntaxError)) throw error;
-      }
-      if (isStoredUser(parsed)) {
-        anonymousId = parsed.anonymousId;
-        authenticatedUserId = parsed.authenticatedUserId;
-        accountId = parsed.accountId;
-      } else {
-        diag.warn("Invalid stored user identity; creating a new identity.");
+    const result = storage.getItem(storageKey);
+    if (result.success) {
+      if (result.value === null) {
         save();
+      } else {
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(result.value);
+        } catch (error) {
+          if (!(error instanceof SyntaxError)) throw error;
+        }
+        if (isStoredUser(parsed)) {
+          anonymousId = parsed.anonymousId;
+          authenticatedUserId = parsed.authenticatedUserId;
+          accountId = parsed.accountId;
+        } else {
+          diag.warn("Invalid stored user identity; creating a new identity.");
+          save();
+        }
       }
     }
   }
@@ -125,7 +131,7 @@ export function createUserContext(
       }
       authenticatedUserId = userId;
       accountId = newAccountId;
-      save();
+      requireIdentityPersisted(save());
     },
     clearAuthenticatedUserContext() {
       authenticatedUserId = undefined;
@@ -139,7 +145,12 @@ export function createUserContext(
     setEnabled(newEnabled) {
       if (newEnabled) {
         enabled = true;
-        save();
+        try {
+          requireIdentityPersisted(save());
+        } catch (error) {
+          enabled = false;
+          throw error;
+        }
       } else {
         requireIdentityCleared(storage.removeItem(storageKey));
         enabled = false;

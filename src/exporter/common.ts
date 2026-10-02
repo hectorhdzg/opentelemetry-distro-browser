@@ -110,8 +110,8 @@ export function createTags(
   const authenticatedUserId =
     attributes[ATTR_ENDUSER_ID] ??
     attributes[ATTR_USER_ID] ??
-    resourceAttributes[ATTR_USER_ID] ??
-    resourceAttributes[ATTR_ENDUSER_ID];
+    resourceAttributes[ATTR_ENDUSER_ID] ??
+    resourceAttributes[ATTR_USER_ID];
   const accountId = attributes[ATTR_USER_ACCOUNT_ID] ?? resourceAttributes[ATTR_USER_ACCOUNT_ID];
   if (anonymousUserId !== undefined) {
     tags["ai.user.id"] = serializeAttribute(anonymousUserId);

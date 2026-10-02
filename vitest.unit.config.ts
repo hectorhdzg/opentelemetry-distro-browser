@@ -1,5 +1,5 @@
 import { defineConfig } from "vitest/config";
-import config from "./vitest.config.js";
+import config, { browserInstances } from "./vitest.config.js";
 
 export default defineConfig({
   ...config,
@@ -7,7 +7,7 @@ export default defineConfig({
     ...config.test,
     browser: {
       ...config.test?.browser,
-      instances: [{ browser: "chromium" }, { browser: "firefox" }, { browser: "webkit" }],
+      instances: browserInstances,
     },
     include: ["test/internal/unit/**/*.test.ts"],
   },

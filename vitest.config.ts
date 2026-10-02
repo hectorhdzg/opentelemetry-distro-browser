@@ -1,6 +1,12 @@
 import { playwright } from "@vitest/browser-playwright";
 import { defineConfig } from "vitest/config";
 
+export const browserInstances = [
+  { browser: "chromium" as const },
+  { browser: "firefox" as const },
+  { browser: "webkit" as const },
+];
+
 export default defineConfig({
   optimizeDeps: {
     include: [

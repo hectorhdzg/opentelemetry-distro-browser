@@ -124,6 +124,8 @@ function parseStack(stack: string, maxSizeInBytes: number): readonly StackFrame[
     const location = locationWithColumn ?? /:(\d+)\)?$/.exec(trimmed);
     if (!location) continue;
 
+    const prefix = trimmed.slice(0, location.index);
+    const openParenthesis = prefix.indexOf(" (");
     const startsWithAt = trimmed.startsWith("at ");
     const atSign = trimmed.indexOf("@");
     const atPrefix = atSign >= 0 ? trimmed.slice(0, atSign) : "";
@@ -138,10 +140,12 @@ function parseStack(stack: string, maxSizeInBytes: number): readonly StackFrame[
     const bareSource = trimmed.slice(0, location.index);
     const isBareSourceLocation =
       !bareSource.includes(" ") && isLikelyCodeSource(bareSource.replace(/\)?$/, ""));
-    if (!startsWithAt && !hasAtLocation && !isBareSourceLocation) continue;
+    const hasParenthesizedLocation =
+      openParenthesis >= 0 && isLikelyCodeSource(prefix.slice(openParenthesis + 2));
+    if (!startsWithAt && !hasAtLocation && !isBareSourceLocation && !hasParenthesizedLocation) {
+      continue;
+    }
 
-    const prefix = trimmed.slice(0, location.index);
-    const openParenthesis = prefix.indexOf(" (");
     let method = "<no_method>";
     let fileName = prefix.replace(/^\s*at\s+/, "").trim();
     if (openParenthesis >= 0) {

@@ -218,6 +218,23 @@ it("removes stale authentication when sign-out follows a quota-limited write", a
   });
 });
 
+it("falls back to in-memory identity when anonymous persistence cannot be restored", async () => {
+  const current = await initialize(true);
+  current.handle.userContext.setAuthenticatedUserContext("persisted-user");
+  vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+    throw new DOMException("full", "QuotaExceededError");
+  });
+
+  expect(() => current.handle.userContext.setAuthenticatedUserContext("new-user")).toThrow(
+    "Unable to persist user identity.",
+  );
+  expect(() => current.handle.userContext.clearAuthenticatedUserContext()).not.toThrow();
+  expect(localStorage.getItem(storageKey)).toBeNull();
+  expect(() =>
+    current.handle.userContext.setAuthenticatedUserContext("in-memory-user"),
+  ).not.toThrow();
+});
+
 it("reports a persistence failure when authenticated identity cannot be saved", async () => {
   const current = await initialize(true);
   vi.spyOn(Storage.prototype, "setItem").mockImplementationOnce(() => {

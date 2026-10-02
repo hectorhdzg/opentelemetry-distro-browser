@@ -141,7 +141,7 @@ export function createUserContext(
       if (enabled) {
         if (!save()) {
           requireIdentityCleared(storage.removeItem(storageKey));
-          save();
+          if (!save()) enabled = false;
         }
       } else {
         clearPersistedAuthenticatedContext();

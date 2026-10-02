@@ -3,6 +3,7 @@
 
 import type { LogRecordProcessor, ReadWriteLogRecord } from "@opentelemetry/sdk-logs";
 import type { Span, SpanProcessor } from "@opentelemetry/sdk-trace-base";
+import { isNonEmptyString } from "../shared/isNonEmptyString.js";
 import {
   ATTR_ENDUSER_ID,
   ATTR_ENDUSER_PSEUDO_ID,
@@ -20,18 +21,21 @@ function enrich(
   setAttribute: (name: string, value: string) => void,
   provider: BrowserContextProvider,
 ): void {
-  if (attributes["session.id"] === undefined) {
+  if (!isNonEmptyString(attributes["session.id"])) {
     const sessionId = provider.getSessionId();
     if (sessionId !== null) setAttribute("session.id", sessionId);
   }
-  if (attributes[ATTR_ENDUSER_PSEUDO_ID] === undefined) {
+  if (!isNonEmptyString(attributes[ATTR_ENDUSER_PSEUDO_ID])) {
     setAttribute(ATTR_ENDUSER_PSEUDO_ID, provider.getAnonymousUserId());
   }
-  if (attributes[ATTR_USER_ID] === undefined && attributes[ATTR_ENDUSER_ID] === undefined) {
+  if (
+    !isNonEmptyString(attributes[ATTR_USER_ID]) &&
+    !isNonEmptyString(attributes[ATTR_ENDUSER_ID])
+  ) {
     const userId = provider.getAuthenticatedUserId();
     if (userId !== undefined) setAttribute(ATTR_USER_ID, userId);
   }
-  if (attributes[ATTR_USER_ACCOUNT_ID] === undefined) {
+  if (!isNonEmptyString(attributes[ATTR_USER_ACCOUNT_ID])) {
     const accountId = provider.getAccountId();
     if (accountId !== undefined) setAttribute(ATTR_USER_ACCOUNT_ID, accountId);
   }

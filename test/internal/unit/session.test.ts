@@ -127,22 +127,28 @@ it.each([undefined, {}, { enabled: false }])(
   },
 );
 
-it.each(["application-session", ""])(
-  "preserves application-provided session IDs (%j) and enriches only missing IDs",
-  async (id) => {
-    const { emit, spans, records } = await initialize();
-    trace
-      .getTracer("application")
-      .startSpan("manual", { attributes: { "session.id": id } })
-      .end();
-    logs.getLogger("application").emit({ attributes: { "session.id": id } });
-    expect(spans.at(-1)?.attributes["session.id"]).toBe(id);
-    expect(records.at(-1)?.attributes["session.id"]).toBe(id);
-    const generated = emit();
-    expect(generated).toMatch(/^[0-9a-f]{32}$/);
-    expect(generated).not.toBe(id);
-  },
-);
+it("preserves a valid application-provided session ID", async () => {
+  const { emit, spans, records } = await initialize();
+  trace
+    .getTracer("application")
+    .startSpan("manual", { attributes: { "session.id": "application-session" } })
+    .end();
+  logs.getLogger("application").emit({ attributes: { "session.id": "application-session" } });
+  expect(spans.at(-1)?.attributes["session.id"]).toBe("application-session");
+  expect(records.at(-1)?.attributes["session.id"]).toBe("application-session");
+  expect(emit()).not.toBe("application-session");
+});
+
+it("replaces an empty application session ID with managed context", async () => {
+  const { spans, records } = await initialize();
+  trace
+    .getTracer("application")
+    .startSpan("manual", { attributes: { "session.id": "" } })
+    .end();
+  logs.getLogger("application").emit({ attributes: { "session.id": "" } });
+  expect(spans.at(-1)?.attributes["session.id"]).toMatch(/^[0-9a-f]{32}$/);
+  expect(records.at(-1)?.attributes["session.id"]).toBe(spans.at(-1)?.attributes["session.id"]);
+});
 
 it("awaits persisted restoration before starting providers or enabling instrumentation", async () => {
   const restored = { id: "restored-session", startTimestamp: Date.now() - 1000 };

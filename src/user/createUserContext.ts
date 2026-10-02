@@ -137,7 +137,10 @@ export function createUserContext(
       authenticatedUserId = undefined;
       accountId = undefined;
       if (enabled) {
-        requireIdentityCleared(save());
+        if (!save()) {
+          requireIdentityCleared(storage.removeItem(storageKey));
+          save();
+        }
       } else {
         clearPersistedAuthenticatedContext();
       }

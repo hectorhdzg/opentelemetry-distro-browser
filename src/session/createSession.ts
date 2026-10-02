@@ -62,7 +62,7 @@ function createDefaultStore(storage: KeyValueStorage) {
       return Promise.resolve(null);
     },
     save(session) {
-      // The manager does not await saves; unexpected storage failures must throw synchronously.
+      // The adapter reports expected browser storage failures; the session remains in memory.
       storage.setItem(storageKey, JSON.stringify({ ...session, lastActivityTimestamp }));
       return Promise.resolve();
     },

@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import type { ReadWriteLogRecord } from "@opentelemetry/sdk-logs";
+import type { LogRecordProcessor, ReadWriteLogRecord } from "@opentelemetry/sdk-logs";
 import type { Span, SpanProcessor } from "@opentelemetry/sdk-trace-base";
 import {
   ATTR_ENDUSER_ID,
@@ -55,7 +55,7 @@ export class BrowserContextSpanProcessor implements SpanProcessor {
   }
 }
 
-export class BrowserContextLogRecordProcessor {
+export class BrowserContextLogRecordProcessor implements LogRecordProcessor {
   public constructor(private readonly provider: BrowserContextProvider) {}
 
   public enabled(): boolean {

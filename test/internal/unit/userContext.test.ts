@@ -183,6 +183,25 @@ it("reports a persistence failure when sign-out cannot rewrite stored identity",
   );
 });
 
+it("removes stale authentication when sign-out follows a quota-limited write", async () => {
+  const current = await initialize(true);
+  current.handle.userContext.setAuthenticatedUserContext("persisted-user");
+  vi.spyOn(Storage.prototype, "setItem").mockImplementationOnce(() => {
+    throw new DOMException("full", "QuotaExceededError");
+  });
+  const remove = vi.spyOn(Storage.prototype, "removeItem");
+
+  expect(() => current.handle.userContext.setAuthenticatedUserContext("new-user")).toThrow(
+    "Unable to persist user identity.",
+  );
+  expect(() => current.handle.userContext.clearAuthenticatedUserContext()).not.toThrow();
+
+  expect(remove).toHaveBeenCalledWith(storageKey);
+  expect(JSON.parse(localStorage.getItem(storageKey)!)).toEqual({
+    anonymousId: current.emit().span.attributes["enduser.pseudo.id"],
+  });
+});
+
 it("reports a persistence failure when authenticated identity cannot be saved", async () => {
   const current = await initialize(true);
   vi.spyOn(Storage.prototype, "setItem").mockImplementationOnce(() => {

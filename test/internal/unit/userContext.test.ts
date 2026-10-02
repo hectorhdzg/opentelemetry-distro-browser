@@ -158,7 +158,7 @@ it("removes invalid stored identity when replacement persistence fails", async (
   expect(localStorage.getItem(storageKey)).toBeNull();
 });
 
-it("reports invalid stored identity cleanup failure", async () => {
+it("continues in memory when invalid stored identity cannot be replaced or removed", async () => {
   localStorage.setItem(storageKey, "{malformed-private-payload");
   vi.spyOn(Storage.prototype, "setItem").mockImplementationOnce(() => {
     throw new DOMException("full", "QuotaExceededError");
@@ -167,7 +167,9 @@ it("reports invalid stored identity cleanup failure", async () => {
     throw new DOMException("denied", "SecurityError");
   });
 
-  await expect(initialize(true)).rejects.toThrow("Unable to clear persisted user identity.");
+  const { emit } = await initialize(true);
+
+  expect(emit().span.attributes["enduser.pseudo.id"]).toMatch(/^[0-9a-f]{32}$/);
 });
 
 it("uses in-memory identity when localStorage is unavailable", async () => {
@@ -210,14 +212,50 @@ it("reports a persistence failure when disabling cannot remove stored identity",
   );
 });
 
-it("treats disabling in-memory persistence as an idempotent no-op", async () => {
+it("does not throw when disabling in-memory persistence with inaccessible storage", async () => {
   const current = await initialize();
-  const remove = vi.spyOn(Storage.prototype, "removeItem").mockImplementation(() => {
+  vi.spyOn(diag, "warn").mockImplementation(() => {});
+  vi.spyOn(Storage.prototype, "removeItem").mockImplementation(() => {
     throw new DOMException("denied", "SecurityError");
   });
 
   expect(() => current.handle.userContext.setEnabled(false)).not.toThrow();
-  expect(remove).not.toHaveBeenCalled();
+});
+
+it("removes identity persisted by an earlier page load when disabling", async () => {
+  localStorage.setItem(storageKey, JSON.stringify({ anonymousId: "earlier-page" }));
+  const current = await initialize();
+
+  current.handle.userContext.setEnabled(false);
+
+  expect(localStorage.getItem(storageKey)).toBeNull();
+});
+
+it("does not throw when signing out with inaccessible storage and persistence disabled", async () => {
+  vi.spyOn(diag, "warn").mockImplementation(() => {});
+  vi.stubGlobal("localStorage", undefined);
+  const current = await initialize();
+  current.handle.userContext.setAuthenticatedUserContext("signed-in-user");
+
+  expect(() => current.handle.userContext.clearAuthenticatedUserContext()).not.toThrow();
+  expect(current.emit().span.attributes["user.id"]).toBeUndefined();
+});
+
+it.each([
+  ["application user.id", { "user.id": "application-user" }],
+  ["application enduser.id", { "enduser.id": "application-user" }],
+  ["application user.account.id", { "user.account.id": "application-account" }],
+])("does not mix managed identity with %s", async (_name, attributes) => {
+  const { handle, emit } = await initialize();
+  handle.userContext.setAuthenticatedUserContext("managed-user", "managed-account");
+
+  const { span, log } = emit(attributes);
+
+  for (const record of [span, log]) {
+    expect(record.attributes).toEqual(expect.objectContaining(attributes));
+    expect(record.attributes["user.id"]).not.toBe("managed-user");
+    expect(record.attributes["user.account.id"]).not.toBe("managed-account");
+  }
 });
 
 it("reports a persistence failure when sign-out cannot mutate storage", async () => {
@@ -235,28 +273,58 @@ it("reports a persistence failure when sign-out cannot mutate storage", async ()
   );
 });
 
-it("removes stale authentication when sign-out follows a quota-limited write", async () => {
+it("removes superseded identity when a new authenticated identity cannot be saved", async () => {
   const current = await initialize(true);
   current.handle.userContext.setAuthenticatedUserContext("persisted-user");
-  vi.spyOn(Storage.prototype, "setItem").mockImplementationOnce(() => {
-    throw new DOMException("full", "QuotaExceededError");
-  });
+  vi.spyOn(Storage.prototype, "setItem")
+    .mockImplementationOnce(() => {
+      throw new DOMException("full", "QuotaExceededError");
+    })
+    .mockImplementationOnce(() => {
+      throw new DOMException("full", "QuotaExceededError");
+    });
   const remove = vi.spyOn(Storage.prototype, "removeItem");
 
   expect(() => current.handle.userContext.setAuthenticatedUserContext("new-user")).toThrow(
     "Unable to persist user identity.",
   );
-  expect(() => current.handle.userContext.clearAuthenticatedUserContext()).not.toThrow();
-
   expect(remove).toHaveBeenCalledWith(storageKey);
+  expect(localStorage.getItem(storageKey)).toBeNull();
+  expect(current.emit().span.attributes["user.id"]).toBe("new-user");
+
+  expect(() => current.handle.userContext.clearAuthenticatedUserContext()).not.toThrow();
   expect(JSON.parse(localStorage.getItem(storageKey)!)).toEqual({
     anonymousId: current.emit().span.attributes["enduser.pseudo.id"],
   });
 });
 
+it("recovers from a quota-limited write by replacing the stored identity", async () => {
+  const current = await initialize(true);
+  current.handle.userContext.setAuthenticatedUserContext("persisted-user");
+  vi.spyOn(Storage.prototype, "setItem").mockImplementationOnce(() => {
+    throw new DOMException("full", "QuotaExceededError");
+  });
+
+  expect(() => current.handle.userContext.setAuthenticatedUserContext("new-user")).not.toThrow();
+  expect(JSON.parse(localStorage.getItem(storageKey)!)).toMatchObject({
+    authenticatedUserId: "new-user",
+  });
+});
+
+it("clears a previous account when authenticated identity is set without one", async () => {
+  const current = await initialize(true);
+  current.handle.userContext.setAuthenticatedUserContext("first-user", "first-account");
+
+  current.handle.userContext.setAuthenticatedUserContext("second-user");
+
+  expect(current.emit().span.attributes["user.account.id"]).toBeUndefined();
+  expect(JSON.parse(localStorage.getItem(storageKey)!)).not.toHaveProperty("accountId");
+});
+
 it("falls back to in-memory identity when anonymous persistence cannot be restored", async () => {
   const current = await initialize(true);
   current.handle.userContext.setAuthenticatedUserContext("persisted-user");
+  const warn = vi.spyOn(diag, "warn").mockImplementation(() => {});
   vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
     throw new DOMException("full", "QuotaExceededError");
   });
@@ -266,6 +334,7 @@ it("falls back to in-memory identity when anonymous persistence cannot be restor
   );
   expect(() => current.handle.userContext.clearAuthenticatedUserContext()).not.toThrow();
   expect(localStorage.getItem(storageKey)).toBeNull();
+  expect(warn).toHaveBeenCalledWith("User identity persistence disabled; storage writes failed.");
   expect(() =>
     current.handle.userContext.setAuthenticatedUserContext("in-memory-user"),
   ).not.toThrow();
@@ -273,7 +342,7 @@ it("falls back to in-memory identity when anonymous persistence cannot be restor
 
 it("reports a persistence failure when authenticated identity cannot be saved", async () => {
   const current = await initialize(true);
-  vi.spyOn(Storage.prototype, "setItem").mockImplementationOnce(() => {
+  vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
     throw new DOMException("full", "QuotaExceededError");
   });
 
@@ -307,10 +376,10 @@ it("removes persisted identity after a transient read failure", async () => {
   expect(localStorage.getItem(storageKey)).toBeNull();
 });
 
-it("can remove persisted identity after a quota-limited write", async () => {
+it("can remove persisted identity after quota-limited writes", async () => {
   const current = await initialize(true);
   const warn = vi.spyOn(diag, "warn").mockImplementation(() => {});
-  vi.spyOn(Storage.prototype, "setItem").mockImplementationOnce(() => {
+  vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
     throw new DOMException("full", "QuotaExceededError");
   });
   const remove = vi.spyOn(Storage.prototype, "removeItem");
@@ -386,7 +455,12 @@ it("preserves application-provided identity attributes", async () => {
 it.each([
   ["", undefined, "Authenticated user ID"],
   ["user", "", "Account ID"],
-] as const)("rejects invalid authenticated context", async (userId, accountId, message) => {
-  const { handle } = await initialize();
-  expect(() => handle.userContext.setAuthenticatedUserContext(userId, accountId)).toThrow(message);
-});
+] as const)(
+  "rejects invalid authenticated context (%j, %j)",
+  async (userId, accountId, message) => {
+    const { handle } = await initialize();
+    expect(() => handle.userContext.setAuthenticatedUserContext(userId, accountId)).toThrow(
+      message,
+    );
+  },
+);

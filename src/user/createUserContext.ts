@@ -2,7 +2,6 @@
 // Licensed under the MIT License.
 
 import { diag } from "@opentelemetry/api";
-import { createDefaultSessionIdGenerator } from "@opentelemetry/browser-sdk/session";
 import {
   createLocalStorageKeyValueStorage,
   type KeyValueStorage,
@@ -15,6 +14,13 @@ interface StoredUser {
   anonymousId: string;
   authenticatedUserId?: string;
   accountId?: string;
+}
+
+/** Generates a 128-bit hexadecimal identifier from the platform's cryptographic random source. */
+function generateAnonymousId(): string {
+  return Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
 }
 
 function isStoredUser(value: unknown): value is StoredUser {
@@ -44,8 +50,7 @@ export function createUserContext(
   provider: UserContextProvider;
 } {
   let enabled = initialEnabled;
-  const generatedAnonymousId = createDefaultSessionIdGenerator().generateSessionId();
-  let anonymousId = generatedAnonymousId;
+  let anonymousId = generateAnonymousId();
   let authenticatedUserId: string | undefined;
   let accountId: string | undefined;
 
@@ -62,6 +67,17 @@ export function createUserContext(
     return storage.setItem(USER_STORAGE_KEY, JSON.stringify(currentUser()));
   }
 
+  /**
+   * Saves the current identity. A failed write removes the stale record, which also lets the
+   * storage adapter recover from quota exhaustion, then retries once. Returns `false` only after
+   * the stale record was removed, so a later page load cannot restore superseded identity.
+   */
+  function persist(): boolean {
+    if (save()) return true;
+    requireIdentityCleared(storage.removeItem(USER_STORAGE_KEY));
+    return save();
+  }
+
   function requireIdentityCleared(cleared: boolean): void {
     if (!cleared) {
       throw new Error("Unable to clear persisted user identity.");
@@ -74,10 +90,12 @@ export function createUserContext(
     }
   }
 
+  // Best effort: identity may have been persisted by an earlier page load, but this instance has
+  // not enabled persistence, so storage that stays inaccessible must not break the caller.
   function clearPersistedAuthenticatedContext(): void {
     const result = storage.getItem(USER_STORAGE_KEY);
     if (!result.success) {
-      requireIdentityCleared(storage.removeItem(USER_STORAGE_KEY));
+      storage.removeItem(USER_STORAGE_KEY);
       return;
     }
     if (result.value === null) return;
@@ -87,12 +105,11 @@ export function createUserContext(
     } catch (error) {
       if (!(error instanceof SyntaxError)) throw error;
     }
-    if (isStoredUser(parsed)) {
-      requireIdentityCleared(
-        storage.setItem(USER_STORAGE_KEY, JSON.stringify({ anonymousId: parsed.anonymousId })),
-      );
-    } else {
-      requireIdentityCleared(storage.removeItem(USER_STORAGE_KEY));
+    if (
+      !isStoredUser(parsed) ||
+      !storage.setItem(USER_STORAGE_KEY, JSON.stringify({ anonymousId: parsed.anonymousId }))
+    ) {
+      storage.removeItem(USER_STORAGE_KEY);
     }
   }
 
@@ -117,7 +134,8 @@ export function createUserContext(
         } else {
           diag.warn("Invalid stored user identity; creating a new identity.");
           if (!save()) {
-            requireIdentityCleared(storage.removeItem(USER_STORAGE_KEY));
+            // The storage adapter already reports failures; initialization continues in memory.
+            storage.removeItem(USER_STORAGE_KEY);
             enabled = false;
           }
         }
@@ -135,35 +153,33 @@ export function createUserContext(
       }
       authenticatedUserId = userId;
       accountId = newAccountId;
-      requireIdentityPersisted(save());
+      requireIdentityPersisted(persist());
     },
     clearAuthenticatedUserContext() {
       authenticatedUserId = undefined;
       accountId = undefined;
-      if (enabled) {
-        if (!save()) {
-          requireIdentityCleared(storage.removeItem(USER_STORAGE_KEY));
-          if (!save()) enabled = false;
-        }
-      } else {
+      if (!enabled) {
         clearPersistedAuthenticatedContext();
+      } else if (!persist()) {
+        // Stale authentication is already removed; keep the anonymous identity in memory.
+        enabled = false;
+        diag.warn("User identity persistence disabled; storage writes failed.");
       }
     },
     setEnabled(newEnabled) {
       if (newEnabled) {
         enabled = true;
         try {
-          if (!save()) {
-            requireIdentityCleared(storage.removeItem(USER_STORAGE_KEY));
-            requireIdentityPersisted(save());
-          }
+          requireIdentityPersisted(persist());
         } catch (error) {
           enabled = false;
           throw error;
         }
       } else {
-        if (!enabled) return;
-        requireIdentityCleared(storage.removeItem(USER_STORAGE_KEY));
+        const removed = storage.removeItem(USER_STORAGE_KEY);
+        // Only an instance that persisted identity must guarantee removal; otherwise clear any
+        // identity left by an earlier page load on a best-effort basis.
+        if (enabled) requireIdentityCleared(removed);
         enabled = false;
       }
     },

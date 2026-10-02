@@ -28,14 +28,14 @@ function enrich(
   if (!isNonEmptyString(attributes[ATTR_ENDUSER_PSEUDO_ID])) {
     setAttribute(ATTR_ENDUSER_PSEUDO_ID, provider.getAnonymousUserId());
   }
+  // Managed user and account form one identity; never mix them with application identity.
   if (
     !isNonEmptyString(attributes[ATTR_USER_ID]) &&
-    !isNonEmptyString(attributes[ATTR_ENDUSER_ID])
+    !isNonEmptyString(attributes[ATTR_ENDUSER_ID]) &&
+    !isNonEmptyString(attributes[ATTR_USER_ACCOUNT_ID])
   ) {
     const userId = provider.getAuthenticatedUserId();
     if (userId !== undefined) setAttribute(ATTR_USER_ID, userId);
-  }
-  if (!isNonEmptyString(attributes[ATTR_USER_ACCOUNT_ID])) {
     const accountId = provider.getAccountId();
     if (accountId !== undefined) setAttribute(ATTR_USER_ACCOUNT_ID, accountId);
   }
@@ -62,6 +62,7 @@ export class BrowserContextSpanProcessor implements SpanProcessor {
 export class BrowserContextLogRecordProcessor implements LogRecordProcessor {
   public constructor(private readonly provider: BrowserContextProvider) {}
 
+  // Enrichment must not enable logging; the SDK still invokes onEmit for accepted records.
   public enabled(): boolean {
     return false;
   }

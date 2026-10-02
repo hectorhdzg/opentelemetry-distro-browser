@@ -76,7 +76,8 @@ export async function useMicrosoftOpenTelemetry(
   options: MicrosoftOpenTelemetryBrowserOptions = {},
 ): Promise<MicrosoftOpenTelemetryBrowser> {
   const userContext = createUserContext(options.userContext?.enabled === true);
-  const azureBatchOptions = {
+  // The handle flushes owned processors on page hide; avoid a second per-processor hide flush.
+  const batchOptions = {
     disableAutoFlushOnDocumentHide: true,
   } satisfies Pick<BatchLogRecordProcessorBrowserOptions, "disableAutoFlushOnDocumentHide">;
   const spanProcessors =
@@ -86,12 +87,12 @@ export async function useMicrosoftOpenTelemetry(
         ? [
             new BatchSpanProcessor(
               new AzureMonitorSpanExporter(options.azureMonitor),
-              azureBatchOptions,
+              batchOptions,
             ),
             ...(options.spanProcessors ?? []),
           ]
         : (options.spanProcessors?.slice() ?? [
-            new BatchSpanProcessor(new OTLPTraceExporter(), azureBatchOptions),
+            new BatchSpanProcessor(new OTLPTraceExporter(), batchOptions),
           ]);
   const logRecordProcessors =
     options.logRecordProcessors?.length === 0
@@ -100,14 +101,14 @@ export async function useMicrosoftOpenTelemetry(
         ? [
             new BatchLogRecordProcessor({
               exporter: new AzureMonitorLogRecordExporter(options.azureMonitor),
-              ...azureBatchOptions,
+              ...batchOptions,
             }),
             ...(options.logRecordProcessors ?? []),
           ]
         : (options.logRecordProcessors?.slice() ?? [
             new BatchLogRecordProcessor({
               exporter: new OTLPLogExporter(),
-              ...azureBatchOptions,
+              ...batchOptions,
             }),
           ]);
   const session = options.session?.enabled === true ? createSession() : undefined;

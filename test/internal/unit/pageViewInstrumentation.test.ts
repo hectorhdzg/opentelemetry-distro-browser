@@ -80,11 +80,11 @@ function waitForPopState(): Promise<void> {
       clearTimeout(timeout);
       resolve();
     };
-    window.addEventListener("popstate", onPopState, { once: true });
     const timeout = window.setTimeout(() => {
       window.removeEventListener("popstate", onPopState);
       reject(new Error("Timed out waiting for popstate"));
     }, 1_000);
+    window.addEventListener("popstate", onPopState, { once: true });
   });
 }
 

@@ -5,6 +5,10 @@ export default defineConfig({
   ...config,
   test: {
     ...config.test,
+    browser: {
+      ...config.test?.browser,
+      instances: [{ browser: "chromium" }, { browser: "firefox" }, { browser: "webkit" }],
+    },
     include: ["test/internal/unit/**/*.test.ts"],
   },
 });

@@ -9,6 +9,7 @@ export default defineConfig({
     browser: {
       ...config.test?.browser,
       commands: { verifyUnloadDelivery },
+      instances: [{ browser: "chromium" }, { browser: "firefox" }, { browser: "webkit" }],
     },
     globalSetup: ["./test/integration/redirectServer.ts"],
     include: ["test/integration/**/*.test.ts"],

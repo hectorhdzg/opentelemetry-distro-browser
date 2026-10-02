@@ -79,14 +79,18 @@ function attributesOf(record: LogRecord): Record<string, unknown> {
 }
 
 beforeEach(() => {
-  history.replaceState(null, "", originalUrl);
+  if (location.href !== originalUrl) {
+    history.replaceState(null, "", originalUrl);
+  }
   document.title = originalTitle;
 });
 
 afterEach(() => {
   active?.disable();
   active = undefined;
-  history.replaceState(null, "", originalUrl);
+  if (location.href !== originalUrl) {
+    history.replaceState(null, "", originalUrl);
+  }
   document.title = originalTitle;
 });
 
@@ -440,7 +444,11 @@ describe("PageViewInstrumentation", () => {
       history.pushState(null, "", "#hash-a");
       await settle();
       provider.records.length = 0;
+      const traversed = new Promise<void>((resolve) => {
+        addEventListener("popstate", () => resolve(), { once: true });
+      });
       history.back();
+      await traversed;
       await settle();
 
       expect(attributesOf(provider.records[0] as LogRecord)[ATTR_PAGE_VIEW_TYPE]).toBe("traverse");

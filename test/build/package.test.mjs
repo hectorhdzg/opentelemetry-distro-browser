@@ -76,22 +76,30 @@ async function bundleConsumer(source, external = []) {
   }
 }
 
-test("the package exposes only ESM entry points without legacy entry fields", () => {
+test("the package exposes ESM and CommonJS entry points", () => {
   assert.equal(pkg.type, "module");
   assert.equal(pkg.sideEffects, false);
-  assert.equal(Object.hasOwn(pkg, "main"), false);
-  assert.equal(Object.hasOwn(pkg, "module"), false);
+  assert.equal(pkg.main, "./dist/commonjs/index.cjs");
+  assert.equal(pkg.module, "./dist/esm/index.js");
   assert.deepEqual(pkg.exports, {
     ".": {
       import: {
         types: "./dist/esm/index.d.ts",
         default: "./dist/esm/index.js",
       },
+      require: {
+        types: "./dist/esm/index.d.ts",
+        default: "./dist/commonjs/index.cjs",
+      },
     },
     "./instrumentations": {
       import: {
         types: "./dist/esm/instrumentations.d.ts",
         default: "./dist/esm/instrumentations.js",
+      },
+      require: {
+        types: "./dist/esm/instrumentations.d.ts",
+        default: "./dist/commonjs/instrumentations.cjs",
       },
     },
     "./snippet": {
@@ -105,8 +113,8 @@ test("the package exposes only ESM entry points without legacy entry fields", ()
   assert.equal(pkg.types, pkg.exports["."].import.types);
 });
 
-test("the build produces only ESM bundles, declarations, and source maps", async () => {
-  assert.deepEqual((await readdir(new URL("dist/", root))).sort(), ["esm"]);
+test("the build produces ESM, CommonJS, UMD, and IIFE artifacts", async () => {
+  assert.deepEqual((await readdir(new URL("dist/", root))).sort(), ["browser", "commonjs", "esm"]);
   assert.deepEqual((await readdir(new URL("dist/esm/", root))).sort(), [
     "index.d.ts",
     "index.js",
@@ -119,6 +127,30 @@ test("the build produces only ESM bundles, declarations, and source maps", async
     "snippet.d.ts",
     "snippet.js",
     "snippet.js.map",
+  ]);
+  assert.deepEqual((await readdir(new URL("dist/commonjs/", root))).sort(), [
+    "index.cjs",
+    "index.cjs.map",
+    "instrumentations.cjs",
+    "instrumentations.cjs.map",
+  ]);
+  assert.deepEqual((await readdir(new URL("dist/browser/", root))).sort(), [
+    "opentelemetry-browser-instrumentations.iife.js",
+    "opentelemetry-browser-instrumentations.iife.js.map",
+    "opentelemetry-browser-instrumentations.iife.min.js",
+    "opentelemetry-browser-instrumentations.iife.min.js.map",
+    "opentelemetry-browser-instrumentations.umd.js",
+    "opentelemetry-browser-instrumentations.umd.js.map",
+    "opentelemetry-browser-instrumentations.umd.min.js",
+    "opentelemetry-browser-instrumentations.umd.min.js.map",
+    "opentelemetry-browser.iife.js",
+    "opentelemetry-browser.iife.js.map",
+    "opentelemetry-browser.iife.min.js",
+    "opentelemetry-browser.iife.min.js.map",
+    "opentelemetry-browser.umd.js",
+    "opentelemetry-browser.umd.js.map",
+    "opentelemetry-browser.umd.min.js",
+    "opentelemetry-browser.umd.min.js.map",
   ]);
 });
 
@@ -343,8 +375,15 @@ test("the minified artifact keeps both API packages external", async () => {
   }
 });
 
-test("the package does not expose a CommonJS entry point", () => {
-  assert.throws(() => require(pkg.name), { code: "ERR_PACKAGE_PATH_NOT_EXPORTED" });
+test("the CommonJS initializer exports both traces and logs", async () => {
+  const distro = require(pkg.name);
+  assert.equal(distro.OPENTELEMETRY_BROWSER_VERSION, pkg.version);
+  await exerciseNpmPackage(distro);
+});
+
+test("the CommonJS instrumentations subpath loads synchronously", () => {
+  const instrumentations = require(`${pkg.name}/instrumentations`);
+  assert.equal(typeof instrumentations.getInstrumentations, "function");
 });
 
 test("version-only and bare imports can tree-shake all SDKs", async () => {
@@ -420,6 +459,50 @@ for (const [name, module, moduleResolution] of [
   });
 }
 
+test("CommonJS consumers resolve declarations with NodeNext", () => {
+  const program = ts.createProgram(
+    [fileURLToPath(new URL("fixtures/consumer.cts", import.meta.url))],
+    {
+      target: ts.ScriptTarget.ES2022,
+      module: ts.ModuleKind.NodeNext,
+      moduleResolution: ts.ModuleResolutionKind.NodeNext,
+      strict: true,
+      noEmit: true,
+      types: ["node"],
+    },
+  );
+  const diagnostics = ts.getPreEmitDiagnostics(program);
+  assert.equal(
+    diagnostics.length,
+    0,
+    ts.formatDiagnosticsWithColorAndContext(diagnostics, {
+      getCanonicalFileName: (file) => file,
+      getCurrentDirectory: ts.sys.getCurrentDirectory,
+      getNewLine: () => "\n",
+    }),
+  );
+});
+
+test("browser bundlers resolve the CommonJS entry without Node runtime imports", async () => {
+  const bundle = await rollup({
+    input: fileURLToPath(new URL("fixtures/browser-consumer.cjs", import.meta.url)),
+    plugins: [nodeResolve({ browser: true }), commonjs()],
+    onwarn(warning, defaultHandler) {
+      if (warning.code === "UNRESOLVED_IMPORT") throw new Error(warning.message);
+      defaultHandler(warning);
+    },
+  });
+  try {
+    const { output } = await bundle.generate({ format: "es" });
+    assert.equal(output.length, 1);
+    assert.deepEqual(output[0].imports, []);
+    assert.doesNotMatch(output[0].code, /\brequire\s*\(|from\s+["'](?:node:)?path["']/);
+    assert.match(output[0].code, /useMicrosoftOpenTelemetry/);
+  } finally {
+    await bundle.close();
+  }
+});
+
 test("unused exports and side-effect-only imports remain tree-shakeable", async () => {
   const bundle = await rollup({
     input: fileURLToPath(new URL("fixtures/tree-shaking.mjs", import.meta.url)),
@@ -435,15 +518,17 @@ test("unused exports and side-effect-only imports remain tree-shakeable", async 
 });
 
 test("every JavaScript bundle ships a source map", async () => {
-  const files = await readdir(new URL("dist/esm/", root));
-  for (const file of files.filter((path) => path.endsWith(".js"))) {
-    const url = new URL(`dist/esm/${file.replaceAll("\\", "/")}`, root);
-    const code = await readFile(url, "utf8");
-    assert.ok(code.includes(`//# sourceMappingURL=${url.pathname.split("/").at(-1)}.map`));
-    const sourceMap = JSON.parse(await readFile(new URL(`${url}.map`), "utf8"));
-    assert.equal(sourceMap.version, 3);
-    assert.ok(sourceMap.sources.length > 0);
-    assert.ok(sourceMap.sourcesContent.some((source) => typeof source === "string" && source));
+  for (const directory of ["esm", "commonjs", "browser"]) {
+    const files = await readdir(new URL(`dist/${directory}/`, root));
+    for (const file of files.filter((path) => path.endsWith(".js") || path.endsWith(".cjs"))) {
+      const url = new URL(`dist/${directory}/${file.replaceAll("\\", "/")}`, root);
+      const code = await readFile(url, "utf8");
+      assert.ok(code.includes(`//# sourceMappingURL=${url.pathname.split("/").at(-1)}.map`));
+      const sourceMap = JSON.parse(await readFile(new URL(`${url}.map`), "utf8"));
+      assert.equal(sourceMap.version, 3);
+      assert.ok(sourceMap.sources.length > 0);
+      assert.ok(sourceMap.sourcesContent.some((source) => typeof source === "string" && source));
+    }
   }
 });
 

@@ -12,6 +12,7 @@ All notable changes to this package are documented in this file.
 - Map page view ID and referrer to Azure Monitor envelopes
 - Add an interactive storefront sample with local span and log exporters and a built-in telemetry
   viewer.
+- Add CommonJS npm entries and self-contained UMD, AMD/RequireJS, and IIFE browser bundles.
 
 ### Changed
 
@@ -21,6 +22,8 @@ All notable changes to this package are documented in this file.
   workflow context while retaining merged-commit-only checkout and export safeguards.
 - Added offline browser performance measurements and explicit result publishing after upstream
   pull requests merge into `main`, including minified, gzip, and Brotli bundle sizes.
+- Run the complete unit and emitted-bundle integration suites across Chromium, Firefox, and WebKit,
+  including every module format, and publish the supported-browser matrix.
 - Replaced proposal-era README content with installation, initialization, configuration,
   instrumentation, OTLP, resource detection, bundle size, and published-alpha guidance.
 - Cover page view and custom event e2e integration

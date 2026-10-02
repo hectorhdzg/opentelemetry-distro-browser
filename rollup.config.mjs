@@ -10,12 +10,16 @@ const esmOutput = {
   sourcemap: true,
 };
 
+const externalOpenTelemetry = (id) => id.startsWith("@opentelemetry/");
+const compile = () => typescript({ tsconfig: "./tsconfig.src.json" });
+const bundleForBrowser = () => [nodeResolve({ browser: true }), commonjs(), compile()];
+
 export default [
   {
     input: "src/index.ts",
     // Share APIs with npm consumers and let their bundler select the SDK platform.
-    external: (id) => id.startsWith("@opentelemetry/"),
-    plugins: [typescript({ tsconfig: "./tsconfig.src.json" })],
+    external: externalOpenTelemetry,
+    plugins: [compile()],
     output: {
       ...esmOutput,
       file: "dist/esm/index.js",
@@ -26,8 +30,8 @@ export default [
     // pay for them. Its on-demand imports stay external here, leaving the consumer's bundler to
     // split out the instrumentations they enable.
     input: "src/instrumentation/browserInstrumentation/index.ts",
-    external: (id) => id.startsWith("@opentelemetry/"),
-    plugins: [typescript({ tsconfig: "./tsconfig.src.json" })],
+    external: externalOpenTelemetry,
+    plugins: [compile()],
     output: {
       ...esmOutput,
       file: "dist/esm/instrumentations.js",
@@ -35,13 +39,31 @@ export default [
   },
   {
     input: "src/index.ts",
+    external: externalOpenTelemetry,
+    plugins: [compile()],
+    output: {
+      file: "dist/commonjs/index.cjs",
+      format: "cjs",
+      exports: "named",
+      sourcemap: true,
+    },
+  },
+  {
+    input: "src/instrumentation/browserInstrumentation/index.ts",
+    external: externalOpenTelemetry,
+    plugins: [compile()],
+    output: {
+      file: "dist/commonjs/instrumentations.cjs",
+      format: "cjs",
+      exports: "named",
+      sourcemap: true,
+    },
+  },
+  {
+    input: "src/index.ts",
     // Retain the application's API singletons, including pre-initialization handles.
     external: ["@opentelemetry/api", "@opentelemetry/api-logs"],
-    plugins: [
-      nodeResolve({ browser: true }),
-      commonjs(),
-      typescript({ tsconfig: "./tsconfig.src.json" }),
-    ],
+    plugins: bundleForBrowser(),
     output: {
       ...esmOutput,
       file: "dist/esm/index.min.js",
@@ -57,6 +79,74 @@ export default [
         }),
       ],
     },
+  },
+  {
+    input: "src/browser.ts",
+    plugins: bundleForBrowser(),
+    output: [
+      {
+        file: "dist/browser/opentelemetry-browser.umd.js",
+        format: "umd",
+        name: "Microsoft.OpenTelemetry",
+        sourcemap: true,
+      },
+      {
+        file: "dist/browser/opentelemetry-browser.umd.min.js",
+        format: "umd",
+        name: "Microsoft.OpenTelemetry",
+        sourcemap: true,
+        plugins: [terser()],
+      },
+      {
+        file: "dist/browser/opentelemetry-browser.iife.js",
+        format: "iife",
+        name: "Microsoft.OpenTelemetry",
+        sourcemap: true,
+      },
+      {
+        file: "dist/browser/opentelemetry-browser.iife.min.js",
+        format: "iife",
+        name: "Microsoft.OpenTelemetry",
+        sourcemap: true,
+        plugins: [terser()],
+      },
+    ],
+  },
+  {
+    input: "src/instrumentation/browserInstrumentation/index.ts",
+    plugins: bundleForBrowser(),
+    output: [
+      {
+        file: "dist/browser/opentelemetry-browser-instrumentations.umd.js",
+        format: "umd",
+        name: "Microsoft.OpenTelemetryInstrumentations",
+        inlineDynamicImports: true,
+        sourcemap: true,
+      },
+      {
+        file: "dist/browser/opentelemetry-browser-instrumentations.umd.min.js",
+        format: "umd",
+        name: "Microsoft.OpenTelemetryInstrumentations",
+        inlineDynamicImports: true,
+        sourcemap: true,
+        plugins: [terser()],
+      },
+      {
+        file: "dist/browser/opentelemetry-browser-instrumentations.iife.js",
+        format: "iife",
+        name: "Microsoft.OpenTelemetryInstrumentations",
+        inlineDynamicImports: true,
+        sourcemap: true,
+      },
+      {
+        file: "dist/browser/opentelemetry-browser-instrumentations.iife.min.js",
+        format: "iife",
+        name: "Microsoft.OpenTelemetryInstrumentations",
+        inlineDynamicImports: true,
+        sourcemap: true,
+        plugins: [terser()],
+      },
+    ],
   },
   {
     input: "src/index.ts",

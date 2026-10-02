@@ -342,6 +342,12 @@ describe("Azure Monitor log envelope mapping", () => {
     expect(exception.stack?.length).toBeLessThan(stack.length);
     expect(parsedStack[0]?.assembly).toContain("frame0");
     expect(parsedStack.at(-1)?.assembly).toContain("frame699");
+    expect(parsedStack.at(-1)?.level).toBe(699);
+    expect(
+      parsedStack.some(
+        (frame, index) => index > 0 && frame.level > parsedStack[index - 1]!.level + 1,
+      ),
+    ).toBe(true);
     expect(parsedStack.length).toBeLessThan(700);
   });
 

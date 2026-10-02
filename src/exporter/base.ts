@@ -149,7 +149,7 @@ function createBatchRequests(
     const serializedSize = encoder.encode(serialized).byteLength;
     if (!allowMultipleBatches && serializedSize + 2 > maxBatchSize) {
       throw new RangeError(
-        `Envelope size ${serializedSize + 2} exceeds the ${maxBatchSize} byte payload limit.`,
+        `Single-envelope payload size ${serializedSize + 2}, including JSON array brackets, exceeds the ${maxBatchSize} byte limit.`,
       );
     }
     if (batch.length > 0 && batchSize + separatorSize + serializedSize > maxBatchSize) {

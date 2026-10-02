@@ -62,6 +62,8 @@ const MAX_EXCEPTION_STACK_LENGTH = 32 * 1024;
 const MAX_EXCEPTION_STACK_SIZE_IN_BYTES = 32 * 1024;
 const MAX_PARSED_STACK_SIZE_IN_BYTES = 32 * 1024;
 const MAX_STACK_FRAME_FIELD_LENGTH = 1024;
+// Exception envelopes must remain independently deliverable through the unload beacon transport.
+const MAX_EXCEPTION_ENVELOPE_SIZE_IN_BYTES = MAX_BEACON_BODY_SIZE;
 let textEncoder: TextEncoder | undefined;
 
 function isPageView(eventName: string | undefined): boolean {
@@ -208,6 +210,7 @@ function parseStack(stack: string, maxSizeInBytes: number): readonly StackFrame[
   }
 
   const capped = [...first, ...last.reverse()];
+  // Preserve original levels so gaps identify frames omitted from the middle by byte capping.
   return capped.length === 0 ? undefined : capped;
 }
 
@@ -247,7 +250,9 @@ export function logToEnvelope(
       baseDataWithoutException,
     );
     const maxExceptionSize =
-      MAX_BEACON_BODY_SIZE - 2 - getUtf8Size(JSON.stringify(envelopeWithoutException));
+      MAX_EXCEPTION_ENVELOPE_SIZE_IN_BYTES -
+      2 -
+      getUtf8Size(JSON.stringify(envelopeWithoutException));
     const stack = logRecord.attributes[EXCEPTION_STACKTRACE];
     const serializedStack = stack === undefined ? undefined : serializeAttribute(stack);
     const typeName = truncateToLength(

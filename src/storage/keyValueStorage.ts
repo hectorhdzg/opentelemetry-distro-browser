@@ -18,7 +18,6 @@ export interface KeyValueStorage {
 }
 
 export function createLocalStorageKeyValueStorage(unavailableMessage: string): KeyValueStorage {
-  let unavailable = false;
   let writesUnavailable = false;
   let warned = false;
 
@@ -33,14 +32,13 @@ export function createLocalStorageKeyValueStorage(unavailableMessage: string): K
     fallback: T,
     operationType: "read" | "write" | "remove",
   ): T {
-    if (unavailable || (operationType === "write" && writesUnavailable)) return fallback;
+    if (operationType === "write" && writesUnavailable) return fallback;
     try {
       if (typeof localStorage !== "undefined") {
         const result = operation(localStorage);
         if (operationType === "remove") writesUnavailable = false;
         return result;
       }
-      unavailable = true;
     } catch (error) {
       if (
         !(error instanceof Error) ||
@@ -50,8 +48,6 @@ export function createLocalStorageKeyValueStorage(unavailableMessage: string): K
       }
       if (operationType === "write" && error.name === "QuotaExceededError") {
         writesUnavailable = true;
-      } else {
-        unavailable = true;
       }
     }
     warnOnce();

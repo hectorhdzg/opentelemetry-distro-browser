@@ -99,9 +99,11 @@ export function createUserContext(
 
   if (enabled) {
     const result = storage.getItem(storageKey);
-    if (result.success) {
+    if (!result.success) {
+      enabled = false;
+    } else {
       if (result.value === null) {
-        save();
+        if (!save()) enabled = false;
       } else {
         let parsed: unknown;
         try {
@@ -115,7 +117,7 @@ export function createUserContext(
           accountId = parsed.accountId;
         } else {
           diag.warn("Invalid stored user identity; creating a new identity.");
-          save();
+          if (!save()) enabled = false;
         }
       }
     }
@@ -149,7 +151,10 @@ export function createUserContext(
       if (newEnabled) {
         enabled = true;
         try {
-          requireIdentityPersisted(save());
+          if (!save()) {
+            requireIdentityCleared(storage.removeItem(storageKey));
+            requireIdentityPersisted(save());
+          }
         } catch (error) {
           enabled = false;
           throw error;

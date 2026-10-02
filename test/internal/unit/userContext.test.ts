@@ -148,12 +148,25 @@ it("uses in-memory identity when localStorage is unavailable", async () => {
   const warn = vi.spyOn(diag, "warn").mockImplementation(() => {});
   vi.stubGlobal("localStorage", undefined);
 
-  const { emit } = await initialize(true);
+  const { handle, emit } = await initialize(true);
 
   expect(emit().span.attributes["enduser.pseudo.id"]).toMatch(/^[0-9a-f]{32}$/);
+  expect(() => handle.userContext.setAuthenticatedUserContext("signed-in-user")).not.toThrow();
   expect(warn).toHaveBeenCalledExactlyOnceWith(
     "User storage unavailable; using in-memory identity.",
   );
+});
+
+it("can enable persistence after localStorage becomes available", async () => {
+  const storage = localStorage;
+  vi.stubGlobal("localStorage", undefined);
+  const current = await initialize(true);
+  vi.stubGlobal("localStorage", storage);
+
+  expect(() => current.handle.userContext.setEnabled(true)).not.toThrow();
+  expect(JSON.parse(localStorage.getItem(storageKey)!)).toEqual({
+    anonymousId: current.emit().span.attributes["enduser.pseudo.id"],
+  });
 });
 
 it("reports a persistence failure when disabling cannot remove stored identity", async () => {
@@ -171,10 +184,13 @@ it("reports a persistence failure when disabling cannot remove stored identity",
   );
 });
 
-it("reports a persistence failure when sign-out cannot rewrite stored identity", async () => {
+it("reports a persistence failure when sign-out cannot mutate storage", async () => {
   const current = await initialize(true);
   current.handle.userContext.setAuthenticatedUserContext("signed-in-user");
-  vi.spyOn(Storage.prototype, "setItem").mockImplementationOnce(() => {
+  vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+    throw new DOMException("denied", "SecurityError");
+  });
+  vi.spyOn(Storage.prototype, "removeItem").mockImplementation(() => {
     throw new DOMException("denied", "SecurityError");
   });
 

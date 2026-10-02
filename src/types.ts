@@ -144,15 +144,21 @@ export interface MicrosoftOpenTelemetryBrowserOptions {
    *
    * @remarks
    * Every initialization creates an anonymous in-memory identity. Set `enabled` to `true` only
-   * when anonymous and authenticated identity may be persisted. Persistence can be changed later
-   * through the returned user context.
+   * when anonymous and authenticated identity may be persisted. The default implementation stores
+   * identity in same-origin `localStorage`, where it remains across browser sessions until
+   * persistence is disabled or the application clears it. Any script running in the origin can
+   * read this storage, so do not use raw personally identifiable information, secrets, or tokens
+   * as identity values. Persistence can be changed later through the returned user context.
    */
   userContext?: { enabled?: boolean };
   /** Advanced trace context and propagation configuration. */
   traces?: MicrosoftOpenTelemetryBrowserTraceOptions;
   /** Span processors to register with the tracer provider. An empty array skips trace initialization. */
   spanProcessors?: SpanProcessor[];
-  /** Log record processors to register with the logger provider. An empty array skips log initialization. */
+  /**
+   * Log record processors to register with the logger provider. Omit to use default OTLP export
+   * with browser-context enrichment; an empty array skips log initialization.
+   */
   logRecordProcessors?: LogRecordProcessor[];
   /**
    * Individually imported OpenTelemetry instrumentation instances to register.

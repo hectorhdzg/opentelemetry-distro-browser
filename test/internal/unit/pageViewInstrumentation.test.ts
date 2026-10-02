@@ -445,7 +445,7 @@ describe("PageViewInstrumentation", () => {
       await settle();
       provider.records.length = 0;
       const traversed = new Promise<void>((resolve) => {
-        addEventListener("popstate", () => resolve(), { once: true });
+        window.addEventListener("popstate", () => resolve(), { once: true });
       });
       history.back();
       await traversed;

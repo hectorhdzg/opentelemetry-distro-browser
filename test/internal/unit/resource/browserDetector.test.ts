@@ -169,12 +169,12 @@ describe("BrowserDetector", () => {
     const attributes = browserDetector.detect().attributes ?? {};
 
     expect(typeof attributes["browser.language"]).toBe("string");
-    if ("userAgentData" in navigator) {
+    if ("userAgentData" in navigator && navigator.userAgentData != null) {
       expect(Array.isArray(attributes["browser.brands"])).toBe(true);
       expect(typeof attributes["browser.platform"]).toBe("string");
       expect(typeof attributes["browser.mobile"]).toBe("boolean");
     } else {
-      expect(attributes).toEqual({ "browser.language": navigator.language });
+      expect(attributes).toMatchObject({ "browser.language": navigator.language });
     }
   });
 

@@ -54,7 +54,7 @@ export default defineConfig([
     },
   },
   {
-    files: ["test/build/fixtures/*.cjs"],
+    files: ["test/build/fixtures/*.{cjs,cts}"],
     languageOptions: {
       globals: globals.node,
     },

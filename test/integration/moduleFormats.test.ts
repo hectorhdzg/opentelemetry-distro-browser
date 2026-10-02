@@ -137,7 +137,7 @@ it.each([
   "opentelemetry-browser.iife.js",
   "opentelemetry-browser.iife.min.js",
 ])("loads and initializes the %s global bundle", async (file) => {
-  window.Microsoft = undefined;
+  delete window.Microsoft;
   const script = await loadScript(file);
   try {
     const bundle = getBrowserBundle();
@@ -146,7 +146,7 @@ it.each([
     await exercise(bundle);
   } finally {
     script.remove();
-    window.Microsoft = undefined;
+    delete window.Microsoft;
   }
 });
 
@@ -175,7 +175,7 @@ it.each([
   "opentelemetry-browser-instrumentations.iife.js",
   "opentelemetry-browser-instrumentations.iife.min.js",
 ])("loads the %s global instrumentation bundle", async (file) => {
-  window.Microsoft = undefined;
+  delete window.Microsoft;
   const script = await loadScript(file);
   try {
     const bundle = getInstrumentationBundle();
@@ -188,7 +188,7 @@ it.each([
     ).toEqual([]);
   } finally {
     script.remove();
-    window.Microsoft = undefined;
+    delete window.Microsoft;
   }
 });
 

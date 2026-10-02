@@ -2,14 +2,22 @@
 // Licensed under the MIT License.
 
 import type { logs as LogsApi } from "@opentelemetry/api-logs";
-import type { trace as TraceApi } from "@opentelemetry/api";
+import type {
+  context as ContextApi,
+  diag as DiagApi,
+  propagation as PropagationApi,
+  trace as TraceApi,
+} from "@opentelemetry/api";
 import { expect, it } from "vitest";
 import type { useMicrosoftOpenTelemetry as Initialize } from "../../src/index.js";
 import type { getInstrumentations as LoadInstrumentations } from "../../src/instrumentation/browserInstrumentation/index.js";
 import { createInMemoryPipeline } from "../fixtures/telemetry.js";
 
 interface BrowserBundle {
+  readonly context: typeof ContextApi;
+  readonly diag: typeof DiagApi;
   readonly logs: typeof LogsApi;
+  readonly propagation: typeof PropagationApi;
   readonly trace: typeof TraceApi;
   readonly OPENTELEMETRY_BROWSER_VERSION: string;
   readonly useMicrosoftOpenTelemetry: typeof Initialize;
@@ -80,9 +88,15 @@ async function exercise(bundle: BrowserBundle): Promise<void> {
       "module-format",
     ]);
   } finally {
-    await telemetry.shutdown();
-    bundle.trace.disable();
-    bundle.logs.disable();
+    try {
+      await telemetry.shutdown();
+    } finally {
+      bundle.trace.disable();
+      bundle.logs.disable();
+      bundle.propagation.disable();
+      bundle.context.disable();
+      bundle.diag.disable();
+    }
   }
 }
 

@@ -74,6 +74,20 @@ async function settle(): Promise<void> {
   });
 }
 
+function waitForPopState(): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const onPopState = (): void => {
+      clearTimeout(timeout);
+      resolve();
+    };
+    window.addEventListener("popstate", onPopState, { once: true });
+    const timeout = window.setTimeout(() => {
+      window.removeEventListener("popstate", onPopState);
+      reject(new Error("Timed out waiting for popstate"));
+    }, 1_000);
+  });
+}
+
 function attributesOf(record: LogRecord): Record<string, unknown> {
   return (record.attributes ?? {}) as Record<string, unknown>;
 }
@@ -444,9 +458,7 @@ describe("PageViewInstrumentation", () => {
       history.pushState(null, "", "#hash-a");
       await settle();
       provider.records.length = 0;
-      const traversed = new Promise<void>((resolve) => {
-        window.addEventListener("popstate", () => resolve(), { once: true });
-      });
+      const traversed = waitForPopState();
       history.back();
       await traversed;
       await settle();

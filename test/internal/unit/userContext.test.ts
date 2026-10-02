@@ -10,8 +10,8 @@ import {
   useMicrosoftOpenTelemetry,
   type MicrosoftOpenTelemetryBrowser,
 } from "../../../src/index.js";
+import { USER_STORAGE_KEY as storageKey } from "../../../src/user/constants.js";
 
-const storageKey = "opentelemetry-user";
 const handles = new Set<MicrosoftOpenTelemetryBrowser>();
 let previousUser: string | null;
 
@@ -144,6 +144,32 @@ it.each([
   );
 });
 
+it("removes invalid stored identity when replacement persistence fails", async () => {
+  localStorage.setItem(storageKey, "{malformed-private-payload");
+  vi.spyOn(Storage.prototype, "setItem").mockImplementationOnce(() => {
+    throw new DOMException("full", "QuotaExceededError");
+  });
+  const remove = vi.spyOn(Storage.prototype, "removeItem");
+
+  const { emit } = await initialize(true);
+
+  expect(emit().span.attributes["enduser.pseudo.id"]).toMatch(/^[0-9a-f]{32}$/);
+  expect(remove).toHaveBeenCalledWith(storageKey);
+  expect(localStorage.getItem(storageKey)).toBeNull();
+});
+
+it("reports invalid stored identity cleanup failure", async () => {
+  localStorage.setItem(storageKey, "{malformed-private-payload");
+  vi.spyOn(Storage.prototype, "setItem").mockImplementationOnce(() => {
+    throw new DOMException("full", "QuotaExceededError");
+  });
+  vi.spyOn(Storage.prototype, "removeItem").mockImplementationOnce(() => {
+    throw new DOMException("denied", "SecurityError");
+  });
+
+  await expect(initialize(true)).rejects.toThrow("Unable to clear persisted user identity.");
+});
+
 it("uses in-memory identity when localStorage is unavailable", async () => {
   const warn = vi.spyOn(diag, "warn").mockImplementation(() => {});
   vi.stubGlobal("localStorage", undefined);
@@ -182,6 +208,16 @@ it("reports a persistence failure when disabling cannot remove stored identity",
   expect(warn).toHaveBeenCalledExactlyOnceWith(
     "User storage unavailable; using in-memory identity.",
   );
+});
+
+it("treats disabling in-memory persistence as an idempotent no-op", async () => {
+  const current = await initialize();
+  const remove = vi.spyOn(Storage.prototype, "removeItem").mockImplementation(() => {
+    throw new DOMException("denied", "SecurityError");
+  });
+
+  expect(() => current.handle.userContext.setEnabled(false)).not.toThrow();
+  expect(remove).not.toHaveBeenCalled();
 });
 
 it("reports a persistence failure when sign-out cannot mutate storage", async () => {

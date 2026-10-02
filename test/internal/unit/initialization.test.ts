@@ -204,8 +204,10 @@ it.each(["both", "context manager", "propagators", "no propagators"] as const)(
         ],
       },
       logs: {
-        processors: [expect.objectContaining({ onEmit: expect.any(Function) })],
-        exportConfig: {},
+        processors: [
+          expect.objectContaining({ onEmit: expect.any(Function) }),
+          expect.any(BatchLogRecordProcessor),
+        ],
       },
     });
     const forwarded = vi.mocked(startBrowserSdk).mock.calls[0]?.[0]?.traces;
@@ -295,6 +297,22 @@ it("force flushes both signal processors", async () => {
   const spanFlush = vi.spyOn(pipeline.spanProcessor, "forceFlush");
   const logFlush = vi.spyOn(pipeline.logProcessor, "forceFlush");
   const handle = await useMicrosoftOpenTelemetry(pipeline.options);
+  handles.add(handle);
+
+  await handle.forceFlush();
+
+  expect(spanFlush).toHaveBeenCalledOnce();
+  expect(logFlush).toHaveBeenCalledOnce();
+});
+
+it("force flushes default OTLP processors", async () => {
+  const spanFlush = vi
+    .spyOn(BatchSpanProcessor.prototype, "forceFlush")
+    .mockResolvedValue(undefined);
+  const logFlush = vi
+    .spyOn(BatchLogRecordProcessor.prototype, "forceFlush")
+    .mockResolvedValue(undefined);
+  const handle = await useMicrosoftOpenTelemetry({ pageView: { enabled: false } });
   handles.add(handle);
 
   await handle.forceFlush();

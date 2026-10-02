@@ -4,6 +4,8 @@
 import { context, diag, trace } from "@opentelemetry/api";
 import { logs } from "@opentelemetry/api-logs";
 import { startBrowserSdk } from "@opentelemetry/browser-sdk";
+import { OTLPLogExporter } from "@opentelemetry/exporter-logs-otlp-http";
+import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
 import {
   BrowserContextLogRecordProcessor,
   BrowserContextSpanProcessor,
@@ -88,7 +90,9 @@ export async function useMicrosoftOpenTelemetry(
             ),
             ...(options.spanProcessors ?? []),
           ]
-        : options.spanProcessors?.slice();
+        : (options.spanProcessors?.slice() ?? [
+            new BatchSpanProcessor(new OTLPTraceExporter(), azureBatchOptions),
+          ]);
   const logRecordProcessors =
     options.logRecordProcessors?.length === 0
       ? []
@@ -100,7 +104,12 @@ export async function useMicrosoftOpenTelemetry(
             }),
             ...(options.logRecordProcessors ?? []),
           ]
-        : options.logRecordProcessors?.slice();
+        : (options.logRecordProcessors?.slice() ?? [
+            new BatchLogRecordProcessor({
+              exporter: new OTLPLogExporter(),
+              ...azureBatchOptions,
+            }),
+          ]);
   const session = options.session?.enabled === true ? createSession() : undefined;
   const traceOptions = options.traces;
   const owned = createOwnedInstrumentations(options);
@@ -231,8 +240,6 @@ export async function useMicrosoftOpenTelemetry(
           : { propagators: traceOptions.propagators.slice() }),
         processors:
           spanProcessors?.length === 0 ? [] : [contextSpanProcessor, ...(spanProcessors ?? [])],
-        // Supplying enrichment processors must not disable upstream default export.
-        ...(spanProcessors === undefined ? { exportConfig: {} } : {}),
       },
       logs: {
         processors:
@@ -243,7 +250,6 @@ export async function useMicrosoftOpenTelemetry(
                 ...(correlation ? [correlation] : []),
                 ...(logRecordProcessors ?? []),
               ],
-        ...(logRecordProcessors === undefined ? { exportConfig: {} } : {}),
       },
     });
     if (instrumentations.length === 0) return handle;

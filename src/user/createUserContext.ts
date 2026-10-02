@@ -9,8 +9,7 @@ import {
 } from "../storage/keyValueStorage.js";
 import { isNonEmptyString } from "../shared/isNonEmptyString.js";
 import type { MicrosoftOpenTelemetryBrowserUserContext } from "../types.js";
-
-const storageKey = "opentelemetry-user";
+import { USER_STORAGE_KEY } from "./constants.js";
 
 interface StoredUser {
   anonymousId: string;
@@ -60,7 +59,7 @@ export function createUserContext(
 
   function save(): boolean {
     if (!enabled) return true;
-    return storage.setItem(storageKey, JSON.stringify(currentUser()));
+    return storage.setItem(USER_STORAGE_KEY, JSON.stringify(currentUser()));
   }
 
   function requireIdentityCleared(cleared: boolean): void {
@@ -76,9 +75,9 @@ export function createUserContext(
   }
 
   function clearPersistedAuthenticatedContext(): void {
-    const result = storage.getItem(storageKey);
+    const result = storage.getItem(USER_STORAGE_KEY);
     if (!result.success) {
-      requireIdentityCleared(storage.removeItem(storageKey));
+      requireIdentityCleared(storage.removeItem(USER_STORAGE_KEY));
       return;
     }
     if (result.value === null) return;
@@ -90,15 +89,15 @@ export function createUserContext(
     }
     if (isStoredUser(parsed)) {
       requireIdentityCleared(
-        storage.setItem(storageKey, JSON.stringify({ anonymousId: parsed.anonymousId })),
+        storage.setItem(USER_STORAGE_KEY, JSON.stringify({ anonymousId: parsed.anonymousId })),
       );
     } else {
-      requireIdentityCleared(storage.removeItem(storageKey));
+      requireIdentityCleared(storage.removeItem(USER_STORAGE_KEY));
     }
   }
 
   if (enabled) {
-    const result = storage.getItem(storageKey);
+    const result = storage.getItem(USER_STORAGE_KEY);
     if (!result.success) {
       enabled = false;
     } else {
@@ -117,7 +116,10 @@ export function createUserContext(
           accountId = parsed.accountId;
         } else {
           diag.warn("Invalid stored user identity; creating a new identity.");
-          if (!save()) enabled = false;
+          if (!save()) {
+            requireIdentityCleared(storage.removeItem(USER_STORAGE_KEY));
+            enabled = false;
+          }
         }
       }
     }
@@ -140,7 +142,7 @@ export function createUserContext(
       accountId = undefined;
       if (enabled) {
         if (!save()) {
-          requireIdentityCleared(storage.removeItem(storageKey));
+          requireIdentityCleared(storage.removeItem(USER_STORAGE_KEY));
           if (!save()) enabled = false;
         }
       } else {
@@ -152,7 +154,7 @@ export function createUserContext(
         enabled = true;
         try {
           if (!save()) {
-            requireIdentityCleared(storage.removeItem(storageKey));
+            requireIdentityCleared(storage.removeItem(USER_STORAGE_KEY));
             requireIdentityPersisted(save());
           }
         } catch (error) {
@@ -160,7 +162,8 @@ export function createUserContext(
           throw error;
         }
       } else {
-        requireIdentityCleared(storage.removeItem(storageKey));
+        if (!enabled) return;
+        requireIdentityCleared(storage.removeItem(USER_STORAGE_KEY));
         enabled = false;
       }
     },

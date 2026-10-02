@@ -17,6 +17,8 @@ All notable changes to this package are documented in this file.
 
 ### Changed
 
+- The prerelease browser lifecycle handle now includes the required `userContext` identity and
+  persistence controls.
 - Correlate page views, spans, and logs through shared operation IDs while preserving explicit
   application span contexts.
 - Fixed post-merge performance publishing for fork contributions by using the upstream

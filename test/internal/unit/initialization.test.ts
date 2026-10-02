@@ -132,6 +132,26 @@ it("adds Azure Monitor batch exporters after session enrichment and before calle
   expect(upstreamHandle.shutdown).toHaveBeenCalledOnce();
 });
 
+it("honors explicit per-signal disabling with Azure Monitor configured", async () => {
+  vi.mocked(startBrowserSdk).mockReturnValueOnce({ shutdown: vi.fn(async () => {}) });
+
+  const handle = await useMicrosoftOpenTelemetry({
+    azureMonitor: {
+      connectionString:
+        "InstrumentationKey=00000000-0000-0000-0000-000000000000;IngestionEndpoint=https://example.test",
+    },
+    spanProcessors: [],
+    logRecordProcessors: [],
+    pageView: { enabled: false },
+  });
+  handles.add(handle);
+
+  expect(startBrowserSdk).toHaveBeenCalledOnce();
+  const sdkOptions = vi.mocked(startBrowserSdk).mock.calls[0]?.[0];
+  expect(sdkOptions?.traces?.processors).toEqual([]);
+  expect(sdkOptions?.logs?.processors).toEqual([]);
+});
+
 it.each(["both", "context manager", "propagators", "no propagators"] as const)(
   "forwards %s without sharing or mutating trace configuration",
   async (configuration) => {

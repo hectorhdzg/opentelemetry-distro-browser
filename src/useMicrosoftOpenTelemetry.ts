@@ -77,24 +77,30 @@ export async function useMicrosoftOpenTelemetry(
   const azureBatchOptions = {
     disableAutoFlushOnDocumentHide: true,
   } satisfies Pick<BatchLogRecordProcessorBrowserOptions, "disableAutoFlushOnDocumentHide">;
-  const spanProcessors = options.azureMonitor
-    ? [
-        new BatchSpanProcessor(
-          new AzureMonitorSpanExporter(options.azureMonitor),
-          azureBatchOptions,
-        ),
-        ...(options.spanProcessors ?? []),
-      ]
-    : options.spanProcessors?.slice();
-  const logRecordProcessors = options.azureMonitor
-    ? [
-        new BatchLogRecordProcessor({
-          exporter: new AzureMonitorLogRecordExporter(options.azureMonitor),
-          ...azureBatchOptions,
-        }),
-        ...(options.logRecordProcessors ?? []),
-      ]
-    : options.logRecordProcessors?.slice();
+  const spanProcessors =
+    options.spanProcessors?.length === 0
+      ? []
+      : options.azureMonitor
+        ? [
+            new BatchSpanProcessor(
+              new AzureMonitorSpanExporter(options.azureMonitor),
+              azureBatchOptions,
+            ),
+            ...(options.spanProcessors ?? []),
+          ]
+        : options.spanProcessors?.slice();
+  const logRecordProcessors =
+    options.logRecordProcessors?.length === 0
+      ? []
+      : options.azureMonitor
+        ? [
+            new BatchLogRecordProcessor({
+              exporter: new AzureMonitorLogRecordExporter(options.azureMonitor),
+              ...azureBatchOptions,
+            }),
+            ...(options.logRecordProcessors ?? []),
+          ]
+        : options.logRecordProcessors?.slice();
   const session = options.session?.enabled === true ? createSession() : undefined;
   const traceOptions = options.traces;
   const owned = createOwnedInstrumentations(options);

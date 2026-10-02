@@ -7,6 +7,7 @@ import {
   createLocalStorageKeyValueStorage,
   type KeyValueStorage,
 } from "../storage/keyValueStorage.js";
+import { isNonEmptyString } from "../shared/isNonEmptyString.js";
 import type { MicrosoftOpenTelemetryBrowserUserContext } from "../types.js";
 
 const storageKey = "opentelemetry-user";
@@ -15,10 +16,6 @@ interface StoredUser {
   anonymousId: string;
   authenticatedUserId?: string;
   accountId?: string;
-}
-
-function isNonEmptyString(value: unknown): value is string {
-  return typeof value === "string" && value.length > 0;
 }
 
 function isStoredUser(value: unknown): value is StoredUser {

@@ -3,6 +3,7 @@
 
 import type { Attributes, HrTime, SpanContext } from "@opentelemetry/api";
 import { OPENTELEMETRY_BROWSER_VERSION } from "../shared/constants.js";
+import { isNonEmptyString, selectNonEmptyString } from "../shared/isNonEmptyString.js";
 import { syntheticPageContexts } from "../shared/pageOperationContext.js";
 import type { AzureMonitorBaseData, AzureMonitorEnvelope } from "./telemetryModels.js";
 import {
@@ -24,10 +25,6 @@ export function beginUnloading(): void {
 
 export function endUnloading(): void {
   unloadingCount = Math.max(0, unloadingCount - 1);
-}
-
-function isNonEmptyString(value: unknown): value is string {
-  return typeof value === "string" && value.length > 0;
 }
 
 export function hrTimeToMilliseconds(hrTime: HrTime): number {
@@ -109,14 +106,18 @@ export function createTags(
     tags["ai.operation.parentId"] = parentContext.spanId;
   }
   if (serviceName) tags["ai.cloud.role"] = serializeAttribute(serviceName);
-  const anonymousUserId =
-    attributes[ATTR_ENDUSER_PSEUDO_ID] ?? resourceAttributes[ATTR_ENDUSER_PSEUDO_ID];
-  const authenticatedUserId =
-    attributes[ATTR_ENDUSER_ID] ??
-    attributes[ATTR_USER_ID] ??
-    resourceAttributes[ATTR_ENDUSER_ID] ??
-    resourceAttributes[ATTR_USER_ID];
-  const accountId = attributes[ATTR_USER_ACCOUNT_ID] ?? resourceAttributes[ATTR_USER_ACCOUNT_ID];
+  const anonymousUserId = selectNonEmptyString(
+    attributes[ATTR_ENDUSER_PSEUDO_ID],
+    resourceAttributes[ATTR_ENDUSER_PSEUDO_ID],
+  );
+  const authenticatedUserId = selectNonEmptyString(
+    selectNonEmptyString(attributes[ATTR_ENDUSER_ID], attributes[ATTR_USER_ID]),
+    selectNonEmptyString(resourceAttributes[ATTR_ENDUSER_ID], resourceAttributes[ATTR_USER_ID]),
+  );
+  const accountId = selectNonEmptyString(
+    attributes[ATTR_USER_ACCOUNT_ID],
+    resourceAttributes[ATTR_USER_ACCOUNT_ID],
+  );
   if (isNonEmptyString(anonymousUserId)) {
     tags["ai.user.id"] = anonymousUserId;
   }

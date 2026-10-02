@@ -161,6 +161,30 @@ describe("Azure Monitor span envelope mapping", () => {
     expect(envelope.tags).not.toHaveProperty("ai.user.accountId");
   });
 
+  it("falls back to valid resource user context when signal values are invalid", () => {
+    const envelope = spanToEnvelope(
+      makeSpan({
+        attributes: {
+          "enduser.pseudo.id": "",
+          "enduser.id": null,
+          "user.account.id": 42,
+        } as unknown as ReadableSpan["attributes"],
+        resource: resourceFromAttributes({
+          "enduser.pseudo.id": "resource-anonymous",
+          "enduser.id": "resource-user",
+          "user.account.id": "resource-account",
+        }),
+      }),
+      instrumentationKey,
+    );
+
+    expect(envelope.tags).toMatchObject({
+      "ai.user.id": "resource-anonymous",
+      "ai.user.authUserId": "resource-user",
+      "ai.user.accountId": "resource-account",
+    });
+  });
+
   it("maps a server span to RequestData", () => {
     const envelope = spanToEnvelope(
       makeSpan({

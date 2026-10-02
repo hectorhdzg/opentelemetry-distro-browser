@@ -114,6 +114,21 @@ describe("Azure Monitor span envelope mapping", () => {
     },
   );
 
+  it("prefers application enduser.id over managed user.id", () => {
+    const envelope = spanToEnvelope(
+      makeSpan({
+        attributes: {
+          "user.id": "managed-user",
+          "enduser.id": "application-user",
+        },
+      }),
+      instrumentationKey,
+    );
+
+    expect(envelope.tags["ai.user.authUserId"]).toBe("application-user");
+    expect(envelope.data.baseData.properties).toBeUndefined();
+  });
+
   it("maps a server span to RequestData", () => {
     const envelope = spanToEnvelope(
       makeSpan({

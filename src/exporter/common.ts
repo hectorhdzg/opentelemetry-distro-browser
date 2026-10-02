@@ -108,8 +108,8 @@ export function createTags(
   const anonymousUserId =
     attributes[ATTR_ENDUSER_PSEUDO_ID] ?? resourceAttributes[ATTR_ENDUSER_PSEUDO_ID];
   const authenticatedUserId =
-    attributes[ATTR_USER_ID] ??
     attributes[ATTR_ENDUSER_ID] ??
+    attributes[ATTR_USER_ID] ??
     resourceAttributes[ATTR_USER_ID] ??
     resourceAttributes[ATTR_ENDUSER_ID];
   const accountId = attributes[ATTR_USER_ACCOUNT_ID] ?? resourceAttributes[ATTR_USER_ACCOUNT_ID];

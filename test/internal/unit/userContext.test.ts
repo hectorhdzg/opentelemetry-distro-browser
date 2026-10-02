@@ -183,6 +183,24 @@ it("reports a persistence failure when sign-out cannot rewrite stored identity",
   );
 });
 
+it("can remove persisted identity after a quota-limited write", async () => {
+  const current = await initialize(true);
+  const warn = vi.spyOn(diag, "warn").mockImplementation(() => {});
+  vi.spyOn(Storage.prototype, "setItem").mockImplementationOnce(() => {
+    throw new DOMException("full", "QuotaExceededError");
+  });
+  const remove = vi.spyOn(Storage.prototype, "removeItem");
+
+  current.handle.userContext.setAuthenticatedUserContext("signed-in-user");
+  expect(() => current.handle.userContext.setEnabled(false)).not.toThrow();
+
+  expect(remove).toHaveBeenCalledWith(storageKey);
+  expect(localStorage.getItem(storageKey)).toBeNull();
+  expect(warn).toHaveBeenCalledExactlyOnceWith(
+    "User storage unavailable; using in-memory identity.",
+  );
+});
+
 it("removes invalid persisted state while clearing authentication", async () => {
   localStorage.setItem(storageKey, "{malformed-private-payload");
   const current = await initialize();

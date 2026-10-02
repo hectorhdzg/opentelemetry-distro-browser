@@ -17,11 +17,28 @@ export interface KeyValueStorage {
 
 export function createLocalStorageKeyValueStorage(unavailableMessage: string): KeyValueStorage {
   let unavailable = false;
+  let writesUnavailable = false;
+  let warned = false;
 
-  function useStorage<T>(operation: (storage: Storage) => T, fallback: T): T {
-    if (unavailable) return fallback;
+  function warnOnce(): void {
+    if (warned) return;
+    warned = true;
+    diag.warn(unavailableMessage);
+  }
+
+  function useStorage<T>(
+    operation: (storage: Storage) => T,
+    fallback: T,
+    operationType: "read" | "write" | "remove",
+  ): T {
+    if (unavailable || (operationType === "write" && writesUnavailable)) return fallback;
     try {
-      if (typeof localStorage !== "undefined") return operation(localStorage);
+      if (typeof localStorage !== "undefined") {
+        const result = operation(localStorage);
+        if (operationType === "remove") writesUnavailable = false;
+        return result;
+      }
+      unavailable = true;
     } catch (error) {
       if (
         !(error instanceof Error) ||
@@ -29,23 +46,35 @@ export function createLocalStorageKeyValueStorage(unavailableMessage: string): K
       ) {
         throw error;
       }
+      if (operationType === "write" && error.name === "QuotaExceededError") {
+        writesUnavailable = true;
+      } else {
+        unavailable = true;
+      }
     }
-    unavailable = true;
-    diag.warn(unavailableMessage);
+    warnOnce();
     return fallback;
   }
 
   return {
-    getItem: (key) => useStorage((storage) => storage.getItem(key), null),
+    getItem: (key) => useStorage((storage) => storage.getItem(key), null, "read"),
     setItem: (key, value) =>
-      useStorage((storage) => {
-        storage.setItem(key, value);
-        return true;
-      }, false),
+      useStorage(
+        (storage) => {
+          storage.setItem(key, value);
+          return true;
+        },
+        false,
+        "write",
+      ),
     removeItem: (key) =>
-      useStorage((storage) => {
-        storage.removeItem(key);
-        return true;
-      }, false),
+      useStorage(
+        (storage) => {
+          storage.removeItem(key);
+          return true;
+        },
+        false,
+        "remove",
+      ),
   };
 }

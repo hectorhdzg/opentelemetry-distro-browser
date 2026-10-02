@@ -141,7 +141,9 @@ function createBatchRequests(
   };
 
   for (const envelope of envelopes) {
-    // Normal-export batch size is a split threshold; ingestion reports oversized item failures.
+    // Normal exports treat maxBatchSize as a split threshold only. A single oversized envelope is
+    // still sent on its own so ingestion can report a per-item failure; rejecting it locally would
+    // hide that diagnostic. Only unload (beacon) exports enforce a hard aggregate limit.
     const separatorSize = batch.length === 0 ? 0 : 1;
     const fittedEnvelope = allowMultipleBatches
       ? envelope

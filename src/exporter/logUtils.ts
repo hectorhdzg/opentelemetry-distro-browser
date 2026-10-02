@@ -62,7 +62,9 @@ const MAX_EXCEPTION_STACK_LENGTH = 32 * 1024;
 const MAX_EXCEPTION_STACK_SIZE_IN_BYTES = 32 * 1024;
 const MAX_PARSED_STACK_SIZE_IN_BYTES = 32 * 1024;
 const MAX_STACK_FRAME_FIELD_LENGTH = 1024;
-// Preserve core exception data within unload limits before optional custom fields are fitted.
+// Budgets core exception data (message, stack, parsed frames) to fit the unload beacon limit.
+// Custom fields are intentionally excluded: they are optional, so during unload the exporter's
+// custom-field fitting drops the largest ones first instead of truncating the exception here.
 const MAX_EXCEPTION_ENVELOPE_SIZE_IN_BYTES = MAX_BEACON_BODY_SIZE;
 let textEncoder: TextEncoder | undefined;
 
@@ -116,6 +118,12 @@ function isLikelyCodeSource(source: string): boolean {
   );
 }
 
+// Firefox function names may contain "/" (e.g. "outer/inner", "Foo/<"), but a path or URL that
+// itself contains "@" (e.g. "node_modules/@scope/pkg.js") must not be split at the "@".
+function isLikelyAtFunctionName(prefix: string): boolean {
+  return !/:\/\/|\\|^[./]|\/$/.test(prefix);
+}
+
 function parseStack(stack: string, maxSizeInBytes: number): readonly StackFrame[] | undefined {
   const frames: StackFrame[] = [];
 
@@ -136,7 +144,7 @@ function parseStack(stack: string, maxSizeInBytes: number): readonly StackFrame[
       !startsWithAt &&
       atSign >= 0 &&
       atSign < location.index &&
-      !isLikelyCodeSource(atPrefix) &&
+      isLikelyAtFunctionName(atPrefix) &&
       isLikelyCodeSource(atSource);
     const bareSource = trimmed.slice(0, location.index);
     const isBareSourceLocation =

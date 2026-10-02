@@ -196,7 +196,10 @@ describe("Azure Monitor log envelope mapping", () => {
       "https://example.test/bootstrap.js:8:3\n" +
       "checkout (https://shop.test/app.js:25:7)\n" +
       `invalid.js:${"9".repeat(400)}:1\n` +
-      "@https://example.test/anonymous.js:12:4";
+      "@https://example.test/anonymous.js:12:4\n" +
+      "outer/inner@https://example.test/app.js:10:5\n" +
+      "Foo.prototype.bar/<@app.js:11:6\n" +
+      "node_modules/@scope/pkg/index.js:13:2";
     const envelope = logToEnvelope(
       makeLog({
         eventName: "exception",
@@ -293,6 +296,27 @@ describe("Azure Monitor log envelope mapping", () => {
         assembly: "@https://example.test/anonymous.js:12:4",
         fileName: "https://example.test/anonymous.js",
         line: 12,
+      },
+      {
+        level: 12,
+        method: "outer/inner",
+        assembly: "outer/inner@https://example.test/app.js:10:5",
+        fileName: "https://example.test/app.js",
+        line: 10,
+      },
+      {
+        level: 13,
+        method: "Foo.prototype.bar/<",
+        assembly: "Foo.prototype.bar/<@app.js:11:6",
+        fileName: "app.js",
+        line: 11,
+      },
+      {
+        level: 14,
+        method: "<no_method>",
+        assembly: "node_modules/@scope/pkg/index.js:13:2",
+        fileName: "node_modules/@scope/pkg/index.js",
+        line: 13,
       },
     ]);
   });

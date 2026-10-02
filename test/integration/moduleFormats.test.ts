@@ -45,7 +45,12 @@ async function loadScript(file: string): Promise<HTMLScriptElement> {
     });
   });
   document.head.append(script);
-  await loaded;
+  try {
+    await loaded;
+  } catch (error) {
+    script.remove();
+    throw error;
+  }
   return script;
 }
 
@@ -117,11 +122,12 @@ it.each(["opentelemetry-browser.umd.js", "opentelemetry-browser.umd.min.js"])(
     define.amd = {};
     window.define = define;
 
-    const script = await loadScript(file);
+    let script: HTMLScriptElement | undefined;
     try {
+      script = await loadScript(file);
       await exercise(await bundle);
     } finally {
-      script.remove();
+      script?.remove();
       window.define = originalDefine;
     }
   },
@@ -168,8 +174,9 @@ it.each([
   define.amd = {};
   window.define = define;
 
-  const script = await loadScript(file);
+  let script: HTMLScriptElement | undefined;
   try {
+    script = await loadScript(file);
     expect(
       await (
         await bundle
@@ -179,7 +186,7 @@ it.each([
       }),
     ).toEqual([]);
   } finally {
-    script.remove();
+    script?.remove();
     window.define = originalDefine;
   }
 });

@@ -71,6 +71,17 @@ function getInstrumentationBundle(): InstrumentationBundle | undefined {
   return window.Microsoft?.OpenTelemetryInstrumentations;
 }
 
+function preserveAmdDefine(): () => void {
+  const descriptor = Object.getOwnPropertyDescriptor(window, "define");
+  return () => {
+    if (descriptor) {
+      Object.defineProperty(window, "define", descriptor);
+    } else {
+      delete window.define;
+    }
+  };
+}
+
 function createAmdBundle<T>(file: string): {
   bundle: Promise<T>;
   cancelTimeout: () => void;
@@ -141,7 +152,7 @@ it.each([
   "opentelemetry-browser.iife.js",
   "opentelemetry-browser.iife.min.js",
 ])("loads and initializes the %s global bundle", async (file) => {
-  const originalDefine = window.define;
+  const restoreDefine = preserveAmdDefine();
   delete window.define;
   delete window.Microsoft;
   let script: HTMLScriptElement | undefined;
@@ -154,14 +165,14 @@ it.each([
   } finally {
     script?.remove();
     delete window.Microsoft;
-    window.define = originalDefine;
+    restoreDefine();
   }
 });
 
 it.each(["opentelemetry-browser.umd.js", "opentelemetry-browser.umd.min.js"])(
   "loads and initializes the %s bundle through AMD/RequireJS",
   async (file) => {
-    const originalDefine = window.define;
+    const restoreDefine = preserveAmdDefine();
     const { bundle, cancelTimeout, define } = createAmdBundle<BrowserBundle>(file);
     window.define = define;
 
@@ -172,7 +183,7 @@ it.each(["opentelemetry-browser.umd.js", "opentelemetry-browser.umd.min.js"])(
     } finally {
       cancelTimeout();
       script?.remove();
-      window.define = originalDefine;
+      restoreDefine();
     }
   },
 );
@@ -183,7 +194,7 @@ it.each([
   "opentelemetry-browser-instrumentations.iife.js",
   "opentelemetry-browser-instrumentations.iife.min.js",
 ])("loads the %s global instrumentation bundle", async (file) => {
-  const originalDefine = window.define;
+  const restoreDefine = preserveAmdDefine();
   delete window.define;
   delete window.Microsoft;
   let script: HTMLScriptElement | undefined;
@@ -200,7 +211,7 @@ it.each([
   } finally {
     script?.remove();
     delete window.Microsoft;
-    window.define = originalDefine;
+    restoreDefine();
   }
 });
 
@@ -208,7 +219,7 @@ it.each([
   "opentelemetry-browser-instrumentations.umd.js",
   "opentelemetry-browser-instrumentations.umd.min.js",
 ])("loads the %s instrumentation bundle through AMD/RequireJS", async (file) => {
-  const originalDefine = window.define;
+  const restoreDefine = preserveAmdDefine();
   const { bundle, cancelTimeout, define } = createAmdBundle<InstrumentationBundle>(file);
   window.define = define;
 
@@ -226,6 +237,6 @@ it.each([
   } finally {
     cancelTimeout();
     script?.remove();
-    window.define = originalDefine;
+    restoreDefine();
   }
 });

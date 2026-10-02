@@ -77,11 +77,12 @@ async function settle(): Promise<void> {
 
 function waitForPopState(): Promise<void> {
   return new Promise<void>((resolve, reject) => {
+    const state: { timeout?: number } = {};
     const onPopState = (): void => {
-      clearTimeout(timeout);
+      clearTimeout(state.timeout);
       resolve();
     };
-    const timeout = window.setTimeout(() => {
+    state.timeout = window.setTimeout(() => {
       window.removeEventListener("popstate", onPopState);
       reject(new Error("Timed out waiting for popstate"));
     }, BROWSER_ASYNC_TIMEOUT_MS);

@@ -215,15 +215,15 @@ Choose the format that matches how the application loads JavaScript:
 
 | Application setup | Use |
 | --- | --- |
-| ESM bundler or native modules | `import` from `@microsoft/opentelemetry-browser` |
+| ESM bundler | `import` from `@microsoft/opentelemetry-browser` |
 | CommonJS bundler | `require("@microsoft/opentelemetry-browser")` |
 | AMD or RequireJS | `dist/browser/opentelemetry-browser.umd.min.js` |
 | Direct `<script>` loading | `dist/browser/opentelemetry-browser.iife.min.js` |
 
 The IIFE bundle exposes `Microsoft.OpenTelemetry`. Use it instead of UMD when RequireJS might already
 be present but the SDK should load as a global. Optional instrumentations have matching
-`opentelemetry-browser-instrumentations.{umd,iife}{.min}.js` bundles and expose
-`Microsoft.OpenTelemetryInstrumentations`.
+`opentelemetry-browser-instrumentations.{umd,iife}.js` bundles, each with a `.min.js` variant, that
+expose `Microsoft.OpenTelemetryInstrumentations`.
 
 ```html
 <script src="/vendor/opentelemetry-browser.iife.min.js"></script>

@@ -13,29 +13,37 @@ for the browser:
 | `dist/esm/index.min.js`              | Minified ESM bundle for browser size checks                                   |
 | `dist/browser/*umd*.js`              | UMD SDK and instrumentation bundles for CommonJS, AMD, RequireJS, and globals |
 | `dist/browser/*iife*.js`             | IIFE SDK and instrumentation bundles for direct classic-script loading        |
-| `dist/esm/*.d.ts`                    | Public TypeScript declarations                                                |
+| `dist/esm/*.d.ts`                    | Public TypeScript declarations for ESM consumers                              |
+| `dist/commonjs/*.d.cts`              | Public TypeScript declarations for CommonJS consumers                         |
 | `dist/**/*.map`                      | Source maps with embedded source content                                      |
 | `dist/esm/snippet.js`                | Configurable SDK loader snippet generator                                     |
 | `dist/esm/snippet.d.ts`              | Loader snippet TypeScript declarations                                        |
 
 Import the package through its `exports` map. The `main` and `module` fields support older bundlers
 and point to the same files selected by the explicit `require` and `import` conditions. The
-`package.json` metadata subpath remains available.
+`package.json` metadata subpath remains available. The CommonJS entries `require()` ESM-only
+OpenTelemetry packages, so they target bundlers and Node.js versions with `require(esm)` support;
+CommonJS test runners such as Jest must transform those dependencies.
 
-The UMD and IIFE builds are self-contained and expose `Microsoft.OpenTelemetry`. They also expose the
-standard OpenTelemetry APIs used by the bundled SDK so direct-script consumers can emit manual
-telemetry without loading a second API copy. Use IIFE when RequireJS may already be present; UMD
-deliberately registers with AMD loaders.
+The `opentelemetry-browser.*` SDK bundles are self-contained and expose `Microsoft.OpenTelemetry`.
+They also expose the standard OpenTelemetry APIs used by the bundled SDK, so direct-script
+consumers can emit manual telemetry without loading a second API copy. The
+`opentelemetry-browser-instrumentations.*` bundles expose `Microsoft.OpenTelemetryInstrumentations`
+and include their own API copy, which shares state with the SDK bundle through the OpenTelemetry
+global registry. Use IIFE when RequireJS may already be present; UMD deliberately registers with
+AMD loaders.
 
-CDN publication remains deferred. The `./snippet` helper requires the caller to supply the UMD or
-IIFE URL, so it does not claim an unpublished CDN location. Production snippets should pass the
-hosted file's `sha384` or stronger digest through `integrity`; the loader applies it together with
-`crossOrigin`.
+CDN publication remains deferred. The `./snippet` helper requires the caller to supply the IIFE
+bundle URL, so it does not claim an unpublished CDN location. The loader reads the
+`Microsoft.OpenTelemetry` global, which a UMD bundle does not set when an AMD loader is present.
+Production snippets should pass the hosted file's `sha384` or stronger digest through `integrity`;
+the loader applies it together with `crossOrigin`.
 
 `npm run test:build` checks the output inventory, ESM and CommonJS package resolution, declaration
-consumption with TypeScript NodeNext and Bundler resolution, source maps, minification, and tree
-shaking. `npm run test:integration` imports the ESM bundles and loads every minified and unminified
-UMD and IIFE artifact in Chromium, Firefox, and WebKit. It exercises both global and AMD loading.
+consumption with TypeScript Node16, NodeNext, and Bundler resolution, source maps, minification,
+and tree shaking. `npm run test:integration` imports the ESM bundles and loads every minified and
+unminified UMD and IIFE artifact in Chromium, Firefox, and WebKit. It exercises both global and AMD
+loading.
 The `sideEffects: false` contract remains in place; importing the package does not initialize
 telemetry.
 

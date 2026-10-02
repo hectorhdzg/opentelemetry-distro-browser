@@ -1,31 +1,33 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import type { logs as LogsApi } from "@opentelemetry/api-logs";
-import type {
-  context as ContextApi,
-  diag as DiagApi,
-  propagation as PropagationApi,
-  trace as TraceApi,
-} from "@opentelemetry/api";
+import type { ContextAPI, DiagAPI, PropagationAPI, TraceAPI } from "@opentelemetry/api";
+import type { LoggerProvider } from "@opentelemetry/api-logs";
 import { expect, it } from "vitest";
-import type { useMicrosoftOpenTelemetry as Initialize } from "../../src/index.js";
-import type { getInstrumentations as LoadInstrumentations } from "../../src/instrumentation/browserInstrumentation/index.js";
+import type {
+  MicrosoftOpenTelemetryBrowser,
+  MicrosoftOpenTelemetryBrowserOptions,
+} from "../../src/index.js";
+import type {
+  BrowserInstrumentation,
+  InstrumentationOptions,
+} from "../../src/instrumentation/browserInstrumentation/index.js";
 import { createInMemoryPipeline } from "../fixtures/telemetry.js";
-import { BROWSER_ASYNC_TIMEOUT_MS } from "../fixtures/timeouts.js";
 
 interface BrowserBundle {
-  readonly context: typeof ContextApi;
-  readonly diag: typeof DiagApi;
-  readonly logs: typeof LogsApi;
-  readonly propagation: typeof PropagationApi;
-  readonly trace: typeof TraceApi;
+  readonly context: ContextAPI;
+  readonly diag: DiagAPI;
+  readonly logs: LoggerProvider & { disable(): void };
+  readonly propagation: PropagationAPI;
+  readonly trace: TraceAPI;
   readonly OPENTELEMETRY_BROWSER_VERSION: string;
-  readonly useMicrosoftOpenTelemetry: typeof Initialize;
+  useMicrosoftOpenTelemetry(
+    options?: MicrosoftOpenTelemetryBrowserOptions,
+  ): Promise<MicrosoftOpenTelemetryBrowser>;
 }
 
 interface InstrumentationBundle {
-  readonly getInstrumentations: typeof LoadInstrumentations;
+  getInstrumentations(options?: InstrumentationOptions): Promise<BrowserInstrumentation[]>;
 }
 
 interface AmdDefine {
@@ -82,37 +84,22 @@ function preserveAmdDefine(): () => void {
   };
 }
 
-function createAmdBundle<T>(file: string): {
-  bundle: Promise<T>;
-  cancelTimeout: () => void;
-  define: AmdDefine;
-} {
-  let resolveBundle!: (bundle: T) => void;
-  let timeout = 0;
-  const bundle = new Promise<T>((resolve, reject) => {
-    timeout = window.setTimeout(
-      () => reject(new Error(`${file} did not call AMD define`)),
-      BROWSER_ASYNC_TIMEOUT_MS,
-    );
-    resolveBundle = (value) => {
-      clearTimeout(timeout);
-      resolve(value);
-    };
-  });
+function captureAmdDefine<T>(): { define: AmdDefine; getRegistration: (file: string) => T } {
+  let registration: { dependencies: string[]; exports: Record<string, unknown> } | undefined;
   const define: AmdDefine = (dependencies, factory) => {
-    expect(dependencies).toEqual(["exports"]);
     const exports = {};
     factory(exports);
-    resolveBundle(exports as unknown as T);
+    registration = { dependencies, exports };
   };
   define.amd = {};
   return {
-    bundle,
-    cancelTimeout: () => {
-      void bundle.catch(() => undefined);
-      clearTimeout(timeout);
-    },
     define,
+    // The UMD wrapper calls `define` while the script executes, so it has run before `load` fires.
+    getRegistration: (file) => {
+      if (!registration) throw new Error(`${file} did not call AMD define`);
+      expect(registration.dependencies).toEqual(["exports"]);
+      return registration.exports as unknown as T;
+    },
   };
 }
 
@@ -159,8 +146,8 @@ it.each([
   try {
     script = await loadScript(file);
     const bundle = getBrowserBundle();
-    expect(bundle?.OPENTELEMETRY_BROWSER_VERSION).toMatch(/^\d+\.\d+\.\d+/);
     if (!bundle) throw new Error(`${file} did not define Microsoft.OpenTelemetry`);
+    expect(bundle.OPENTELEMETRY_BROWSER_VERSION).toMatch(/^\d+\.\d+\.\d+/);
     await exercise(bundle);
   } finally {
     script?.remove();
@@ -173,15 +160,14 @@ it.each(["opentelemetry-browser.umd.js", "opentelemetry-browser.umd.min.js"])(
   "loads and initializes the %s bundle through AMD/RequireJS",
   async (file) => {
     const restoreDefine = preserveAmdDefine();
-    const { bundle, cancelTimeout, define } = createAmdBundle<BrowserBundle>(file);
+    const { define, getRegistration } = captureAmdDefine<BrowserBundle>();
     window.define = define;
 
     let script: HTMLScriptElement | undefined;
     try {
       script = await loadScript(file);
-      await exercise(await bundle);
+      await exercise(getRegistration(file));
     } finally {
-      cancelTimeout();
       script?.remove();
       restoreDefine();
     }
@@ -220,22 +206,19 @@ it.each([
   "opentelemetry-browser-instrumentations.umd.min.js",
 ])("loads the %s instrumentation bundle through AMD/RequireJS", async (file) => {
   const restoreDefine = preserveAmdDefine();
-  const { bundle, cancelTimeout, define } = createAmdBundle<InstrumentationBundle>(file);
+  const { define, getRegistration } = captureAmdDefine<InstrumentationBundle>();
   window.define = define;
 
   let script: HTMLScriptElement | undefined;
   try {
     script = await loadScript(file);
     expect(
-      await (
-        await bundle
-      ).getInstrumentations({
+      await getRegistration(file).getInstrumentations({
         fetch: { enabled: false },
         xhr: { enabled: false },
       }),
     ).toEqual([]);
   } finally {
-    cancelTimeout();
     script?.remove();
     restoreDefine();
   }

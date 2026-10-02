@@ -14,6 +14,17 @@ const externalOpenTelemetry = (id) => id.startsWith("@opentelemetry/");
 const compile = () => typescript({ tsconfig: "./tsconfig.src.json" });
 const bundleForBrowser = () => [nodeResolve({ browser: true }), commonjs(), compile()];
 
+// The CommonJS runtime loads its ESM-only dependencies with `import()`, so its declarations must
+// resolve them as ESM too; otherwise TypeScript rejects them under Node16 module resolution.
+const commonJsDeclarationImports = {
+  name: "commonjs-declaration-imports",
+  renderChunk: (code) =>
+    code.replace(
+      /^import (?!type )(.+) from '([^']+)';$/gm,
+      "import type $1 from '$2' with { 'resolution-mode': 'import' };",
+    ),
+};
+
 export default [
   {
     input: "src/index.ts",
@@ -159,18 +170,23 @@ export default [
   {
     input: "src/index.ts",
     plugins: [dts({ tsconfig: "./tsconfig.src.json" })],
-    output: {
-      file: "dist/esm/index.d.ts",
-      format: "es",
-    },
+    // `.d.cts` copies keep TypeScript from treating the `require` entry points as ESM.
+    output: [
+      { file: "dist/esm/index.d.ts", format: "es" },
+      { file: "dist/commonjs/index.d.cts", format: "es", plugins: [commonJsDeclarationImports] },
+    ],
   },
   {
     input: "src/instrumentation/browserInstrumentation/index.ts",
     plugins: [dts({ tsconfig: "./tsconfig.src.json" })],
-    output: {
-      file: "dist/esm/instrumentations.d.ts",
-      format: "es",
-    },
+    output: [
+      { file: "dist/esm/instrumentations.d.ts", format: "es" },
+      {
+        file: "dist/commonjs/instrumentations.d.cts",
+        format: "es",
+        plugins: [commonJsDeclarationImports],
+      },
+    ],
   },
   {
     input: "src/snippet.ts",

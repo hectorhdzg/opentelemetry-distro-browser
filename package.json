@@ -14,7 +14,7 @@
         "default": "./dist/esm/index.js"
       },
       "require": {
-        "types": "./dist/esm/index.d.ts",
+        "types": "./dist/commonjs/index.d.cts",
         "default": "./dist/commonjs/index.cjs"
       }
     },
@@ -24,7 +24,7 @@
         "default": "./dist/esm/instrumentations.js"
       },
       "require": {
-        "types": "./dist/esm/instrumentations.d.ts",
+        "types": "./dist/commonjs/instrumentations.d.cts",
         "default": "./dist/commonjs/instrumentations.cjs"
       }
     },

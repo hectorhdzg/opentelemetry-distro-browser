@@ -75,7 +75,7 @@ jobs:
   tests:
     name: Browser tests, API, and bundles (Node ${{ matrix.node-version }})
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -197,7 +197,7 @@ jobs:
         run: npm ci
 
       - name: Install Chromium and system dependencies
-        run: npm run test:install-browsers -- --with-deps
+        run: npx playwright install chromium --with-deps
 
       - name: Run baseline coverage
         # The base revision may not yet configure the JSON summary reporter.

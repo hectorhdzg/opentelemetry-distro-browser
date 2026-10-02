@@ -33,28 +33,48 @@ const sharedApiPackages = ["@opentelemetry/api", "@opentelemetry/api-logs"];
 
 function findUndeclaredRequireCalls(code) {
   const source = ts.createSourceFile("bundle.js", code, ts.ScriptTarget.Latest, true);
-  const calls = new Set();
-  const declarations = new Set();
+  const scopes = new Map([[source, new Set()]]);
+  const calls = [];
+  const enclosingScope = (node) => {
+    let current = node.parent;
+    while (current && !scopes.has(current)) current = current.parent;
+    return current ?? source;
+  };
+  const declare = (node, name) => {
+    if (name && ts.isIdentifier(name)) scopes.get(enclosingScope(node)).add(name.text);
+  };
   const visit = (node) => {
-    if (
-      (ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node)) &&
-      node.name &&
-      ts.isIdentifier(node.name)
+    if (ts.isFunctionLike(node)) {
+      // A function declaration's name belongs to the surrounding scope; everything else is local.
+      if (ts.isFunctionDeclaration(node)) declare(node, node.name);
+      scopes.set(node, new Set());
+      if (ts.isFunctionExpression(node) && node.name) scopes.get(node).add(node.name.text);
+    } else if (
+      ts.isParameter(node) ||
+      ts.isVariableDeclaration(node) ||
+      ts.isClassDeclaration(node)
     ) {
-      declarations.add(node.name.text);
-    } else if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)) {
-      declarations.add(node.name.text);
+      declare(node, node.name);
     } else if (
       ts.isCallExpression(node) &&
       ts.isIdentifier(node.expression) &&
       /^require(?:$|[$A-Z_])/.test(node.expression.text)
     ) {
-      calls.add(node.expression.text);
+      calls.push(node);
     }
     ts.forEachChild(node, visit);
   };
   visit(source);
-  return [...calls].filter((name) => !declarations.has(name)).sort();
+  const undeclared = new Set();
+  for (const call of calls) {
+    const name = call.expression.text;
+    let scope = enclosingScope(call);
+    while (scope && !scopes.get(scope).has(name)) {
+      scope = scope === source ? undefined : enclosingScope(scope);
+    }
+    if (!scope) undeclared.add(name);
+  }
+  return [...undeclared].sort();
 }
 
 test("the package is configured for a public alpha release", () => {
@@ -114,7 +134,7 @@ test("the package exposes ESM and CommonJS entry points", () => {
         default: "./dist/esm/index.js",
       },
       require: {
-        types: "./dist/esm/index.d.ts",
+        types: "./dist/commonjs/index.d.cts",
         default: "./dist/commonjs/index.cjs",
       },
     },
@@ -124,7 +144,7 @@ test("the package exposes ESM and CommonJS entry points", () => {
         default: "./dist/esm/instrumentations.js",
       },
       require: {
-        types: "./dist/esm/instrumentations.d.ts",
+        types: "./dist/commonjs/instrumentations.d.cts",
         default: "./dist/commonjs/instrumentations.cjs",
       },
     },
@@ -157,8 +177,10 @@ test("the build produces ESM, CommonJS, UMD, and IIFE artifacts", async () => {
   assert.deepEqual((await readdir(new URL("dist/commonjs/", root))).sort(), [
     "index.cjs",
     "index.cjs.map",
+    "index.d.cts",
     "instrumentations.cjs",
     "instrumentations.cjs.map",
+    "instrumentations.d.cts",
   ]);
   assert.deepEqual((await readdir(new URL("dist/browser/", root))).sort(), [
     "opentelemetry-browser-instrumentations.iife.js",
@@ -407,9 +429,15 @@ test("the CommonJS initializer configures both traces and logs", async () => {
   await exerciseNpmPackage(distro);
 });
 
-test("the CommonJS instrumentations subpath loads synchronously", () => {
-  const instrumentations = require(`${pkg.name}/instrumentations`);
-  assert.equal(typeof instrumentations.getInstrumentations, "function");
+test("the CommonJS instrumentations subpath constructs selected instrumentations", async () => {
+  const { getInstrumentations } = require(`${pkg.name}/instrumentations`);
+  const instrumentations = await getInstrumentations({
+    fetch: { enabled: false },
+    xhr: { enabled: false },
+    console: { enabled: true },
+  });
+  assert.equal(instrumentations.length, 1);
+  assert.equal(instrumentations[0].constructor.name, "ConsoleInstrumentation");
 });
 
 test("version-only and bare imports can tree-shake all SDKs", async () => {
@@ -485,29 +513,44 @@ for (const [name, module, moduleResolution] of [
   });
 }
 
-test("CommonJS consumers resolve declarations with NodeNext", () => {
-  const program = ts.createProgram(
-    [fileURLToPath(new URL("fixtures/consumer.cts", import.meta.url))],
-    {
-      target: ts.ScriptTarget.ES2022,
-      module: ts.ModuleKind.NodeNext,
-      moduleResolution: ts.ModuleResolutionKind.NodeNext,
-      strict: true,
-      noEmit: true,
-      types: ["node"],
-    },
-  );
-  const diagnostics = ts.getPreEmitDiagnostics(program);
-  assert.equal(
-    diagnostics.length,
-    0,
-    ts.formatDiagnosticsWithColorAndContext(diagnostics, {
-      getCanonicalFileName: (file) => file,
-      getCurrentDirectory: ts.sys.getCurrentDirectory,
-      getNewLine: () => "\n",
-    }),
-  );
-});
+for (const [name, module, moduleResolution] of [
+  ["Node16", ts.ModuleKind.Node16, ts.ModuleResolutionKind.Node16],
+  ["NodeNext", ts.ModuleKind.NodeNext, ts.ModuleResolutionKind.NodeNext],
+]) {
+  test(`CommonJS consumers resolve CommonJS declarations with ${name}`, () => {
+    const program = ts.createProgram(
+      [fileURLToPath(new URL("fixtures/consumer.cts", import.meta.url))],
+      {
+        target: ts.ScriptTarget.ES2022,
+        module,
+        moduleResolution,
+        strict: true,
+        noEmit: true,
+        types: ["node"],
+      },
+    );
+    const diagnostics = ts.getPreEmitDiagnostics(program);
+    assert.equal(
+      diagnostics.length,
+      0,
+      ts.formatDiagnosticsWithColorAndContext(diagnostics, {
+        getCanonicalFileName: (file) => file,
+        getCurrentDirectory: ts.sys.getCurrentDirectory,
+        getNewLine: () => "\n",
+      }),
+    );
+    const packageDist = fileURLToPath(new URL("dist/", root)).replaceAll("\\", "/");
+    const resolved = program
+      .getSourceFiles()
+      .map((file) => file.fileName.replaceAll("\\", "/"))
+      .filter((file) => file.toLowerCase().startsWith(packageDist.toLowerCase()));
+    assert.ok(resolved.length > 0);
+    assert.ok(
+      resolved.every((file) => file.endsWith(".d.cts")),
+      resolved.join("\n"),
+    );
+  });
+}
 
 test("browser bundlers resolve the CommonJS entry without Node runtime imports", async () => {
   const bundle = await rollup({
@@ -527,7 +570,7 @@ test("browser bundlers resolve the CommonJS entry without Node runtime imports",
     assert.ok(moduleIds.some((id) => id.includes("/dist/commonjs/index.cjs")));
     assert.ok(moduleIds.every((id) => !id.includes("/dist/esm/index.js")));
     assert.deepEqual(findUndeclaredRequireCalls(output[0].code), []);
-    assert.doesNotMatch(output[0].code, /from\s+["'](?:node:)?path["']/);
+    assert.doesNotMatch(output[0].code, /Could not dynamically require/);
     assert.match(output[0].code, /useMicrosoftOpenTelemetry/);
   } finally {
     await bundle.close();

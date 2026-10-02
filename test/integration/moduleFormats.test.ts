@@ -12,6 +12,7 @@ import { expect, it } from "vitest";
 import type { useMicrosoftOpenTelemetry as Initialize } from "../../src/index.js";
 import type { getInstrumentations as LoadInstrumentations } from "../../src/instrumentation/browserInstrumentation/index.js";
 import { createInMemoryPipeline } from "../fixtures/telemetry.js";
+import { BROWSER_ASYNC_TIMEOUT_MS } from "../fixtures/timeouts.js";
 
 interface BrowserBundle {
   readonly context: typeof ContextApi;
@@ -78,7 +79,10 @@ function createAmdBundle<T>(file: string): {
   let resolveBundle!: (bundle: T) => void;
   let timeout = 0;
   const bundle = new Promise<T>((resolve, reject) => {
-    timeout = window.setTimeout(() => reject(new Error(`${file} did not call AMD define`)), 1_000);
+    timeout = window.setTimeout(
+      () => reject(new Error(`${file} did not call AMD define`)),
+      BROWSER_ASYNC_TIMEOUT_MS,
+    );
     resolveBundle = (value) => {
       clearTimeout(timeout);
       resolve(value);
@@ -137,16 +141,20 @@ it.each([
   "opentelemetry-browser.iife.js",
   "opentelemetry-browser.iife.min.js",
 ])("loads and initializes the %s global bundle", async (file) => {
+  const originalDefine = window.define;
+  delete window.define;
   delete window.Microsoft;
-  const script = await loadScript(file);
+  let script: HTMLScriptElement | undefined;
   try {
+    script = await loadScript(file);
     const bundle = getBrowserBundle();
     expect(bundle?.OPENTELEMETRY_BROWSER_VERSION).toMatch(/^\d+\.\d+\.\d+/);
     if (!bundle) throw new Error(`${file} did not define Microsoft.OpenTelemetry`);
     await exercise(bundle);
   } finally {
-    script.remove();
+    script?.remove();
     delete window.Microsoft;
+    window.define = originalDefine;
   }
 });
 
@@ -175,9 +183,12 @@ it.each([
   "opentelemetry-browser-instrumentations.iife.js",
   "opentelemetry-browser-instrumentations.iife.min.js",
 ])("loads the %s global instrumentation bundle", async (file) => {
+  const originalDefine = window.define;
+  delete window.define;
   delete window.Microsoft;
-  const script = await loadScript(file);
+  let script: HTMLScriptElement | undefined;
   try {
+    script = await loadScript(file);
     const bundle = getInstrumentationBundle();
     expect(typeof bundle?.getInstrumentations).toBe("function");
     expect(
@@ -187,8 +198,9 @@ it.each([
       }),
     ).toEqual([]);
   } finally {
-    script.remove();
+    script?.remove();
     delete window.Microsoft;
+    window.define = originalDefine;
   }
 });
 

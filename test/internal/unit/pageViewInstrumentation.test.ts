@@ -10,6 +10,7 @@ import {
 } from "@opentelemetry/api-logs";
 import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import type { BrowserInstrumentation } from "../../../src/types.js";
+import { BROWSER_ASYNC_TIMEOUT_MS } from "../../fixtures/timeouts.js";
 import {
   createPageViewContext,
   generatePageViewId,
@@ -83,7 +84,7 @@ function waitForPopState(): Promise<void> {
     const timeout = window.setTimeout(() => {
       window.removeEventListener("popstate", onPopState);
       reject(new Error("Timed out waiting for popstate"));
-    }, 1_000);
+    }, BROWSER_ASYNC_TIMEOUT_MS);
     window.addEventListener("popstate", onPopState, { once: true });
   });
 }

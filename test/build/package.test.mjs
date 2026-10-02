@@ -31,6 +31,32 @@ const require = createRequire(import.meta.url);
 const esmBundle = "dist/esm/index";
 const sharedApiPackages = ["@opentelemetry/api", "@opentelemetry/api-logs"];
 
+function findUndeclaredRequireCalls(code) {
+  const source = ts.createSourceFile("bundle.js", code, ts.ScriptTarget.Latest, true);
+  const calls = new Set();
+  const declarations = new Set();
+  const visit = (node) => {
+    if (
+      (ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node)) &&
+      node.name &&
+      ts.isIdentifier(node.name)
+    ) {
+      declarations.add(node.name.text);
+    } else if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)) {
+      declarations.add(node.name.text);
+    } else if (
+      ts.isCallExpression(node) &&
+      ts.isIdentifier(node.expression) &&
+      /^require(?:$|[$A-Z_])/.test(node.expression.text)
+    ) {
+      calls.add(node.expression.text);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return [...calls].filter((name) => !declarations.has(name)).sort();
+}
+
 test("the package is configured for a public alpha release", () => {
   assert.equal(pkg.name, "@microsoft/opentelemetry-browser");
   assert.equal(pkg.version, "0.1.0-alpha.1");
@@ -496,7 +522,9 @@ test("browser bundlers resolve the CommonJS entry without Node runtime imports",
     const { output } = await bundle.generate({ format: "es" });
     assert.equal(output.length, 1);
     assert.deepEqual(output[0].imports, []);
-    assert.doesNotMatch(output[0].code, /\brequire\s*\(|from\s+["'](?:node:)?path["']/);
+    assert.deepEqual(output[0].dynamicImports, []);
+    assert.deepEqual(findUndeclaredRequireCalls(output[0].code), []);
+    assert.doesNotMatch(output[0].code, /from\s+["'](?:node:)?path["']/);
     assert.match(output[0].code, /useMicrosoftOpenTelemetry/);
   } finally {
     await bundle.close();

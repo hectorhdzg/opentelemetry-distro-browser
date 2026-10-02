@@ -523,6 +523,9 @@ test("browser bundlers resolve the CommonJS entry without Node runtime imports",
     assert.equal(output.length, 1);
     assert.deepEqual(output[0].imports, []);
     assert.deepEqual(output[0].dynamicImports, []);
+    const moduleIds = Object.keys(output[0].modules).map((id) => id.replaceAll("\\", "/"));
+    assert.ok(moduleIds.some((id) => id.includes("/dist/commonjs/index.cjs")));
+    assert.ok(moduleIds.every((id) => !id.includes("/dist/esm/index.js")));
     assert.deepEqual(findUndeclaredRequireCalls(output[0].code), []);
     assert.doesNotMatch(output[0].code, /from\s+["'](?:node:)?path["']/);
     assert.match(output[0].code, /useMicrosoftOpenTelemetry/);

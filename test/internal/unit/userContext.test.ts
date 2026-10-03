@@ -130,6 +130,7 @@ it.each([
   "null",
   '{"anonymousId":""}',
   '{"anonymousId":"anonymous","accountId":"tenant"}',
+  '["anonymous"]',
 ])("replaces invalid stored identity (%j) without logging its contents", async (stored) => {
   localStorage.setItem(storageKey, stored);
   const warn = vi.spyOn(diag, "warn").mockImplementation(() => {});
@@ -168,6 +169,47 @@ it("continues in memory when invalid stored identity cannot be replaced or remov
   });
 
   const { emit } = await initialize(true);
+
+  expect(emit().span.attributes["enduser.pseudo.id"]).toMatch(/^[0-9a-f]{32}$/);
+});
+
+it.each([
+  ["anonymousId", "{}", /^[0-9a-f]{32}$/, { "user.id": undefined, "user.account.id": undefined }],
+  [
+    "authenticatedUserId",
+    '{"anonymousId":"own-anonymous"}',
+    /^own-anonymous$/,
+    { "user.id": undefined, "user.account.id": undefined },
+  ],
+  [
+    "accountId",
+    '{"anonymousId":"own-anonymous","authenticatedUserId":"own-user"}',
+    /^own-anonymous$/,
+    { "user.id": "own-user", "user.account.id": undefined },
+  ],
+] as const)("ignores inherited %s on stored identity", async (key, stored, pseudoId, expected) => {
+  localStorage.setItem(storageKey, stored);
+  Object.defineProperty(Object.prototype, key, { value: "polluted", configurable: true });
+  try {
+    const { emit } = await initialize(true);
+    const attributes = emit().span.attributes;
+
+    expect(attributes["enduser.pseudo.id"]).toMatch(pseudoId);
+    for (const [name, value] of Object.entries(expected)) {
+      expect(attributes[name]).toBe(value);
+    }
+  } finally {
+    delete (Object.prototype as Record<string, unknown>)[key];
+  }
+});
+
+it.each([
+  ["missing Web Crypto", undefined],
+  ["Web Crypto without getRandomValues", {}],
+])("generates an anonymous identity with %s", async (_name, crypto) => {
+  vi.stubGlobal("crypto", crypto);
+
+  const { emit } = await initialize();
 
   expect(emit().span.attributes["enduser.pseudo.id"]).toMatch(/^[0-9a-f]{32}$/);
 });

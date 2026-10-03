@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 import { diag } from "@opentelemetry/api";
+import { createDefaultSessionIdGenerator } from "@opentelemetry/browser-sdk/session";
 import {
   createLocalStorageKeyValueStorage,
   type KeyValueStorage,
@@ -16,22 +17,60 @@ interface StoredUser {
   accountId?: string;
 }
 
-/** Generates a 128-bit hexadecimal identifier from the platform's cryptographic random source. */
-function generateAnonymousId(): string {
-  return Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) =>
-    byte.toString(16).padStart(2, "0"),
-  ).join("");
+interface StoredUserFields {
+  anonymousId: string;
+  authenticatedUserId: string | undefined;
+  accountId: string | undefined;
 }
 
-function isStoredUser(value: unknown): value is StoredUser {
-  if (typeof value !== "object" || value === null || !("anonymousId" in value)) return false;
-  const user = value as Partial<StoredUser>;
-  const hasAuthenticatedUser = user.authenticatedUserId !== undefined;
-  return (
-    isNonEmptyString(user.anonymousId) &&
-    (!hasAuthenticatedUser || isNonEmptyString(user.authenticatedUserId)) &&
-    (user.accountId === undefined || (hasAuthenticatedUser && isNonEmptyString(user.accountId)))
+/**
+ * Generates a 128-bit hexadecimal identifier from the platform's cryptographic random source.
+ * Where Web Crypto is unavailable, falls back to the upstream session ID generator, which uses
+ * `Math.random()` and is not cryptographically secure.
+ */
+function generateAnonymousId(): string {
+  const random = globalThis.crypto?.getRandomValues?.bind(globalThis.crypto);
+  if (!random) return createDefaultSessionIdGenerator().generateSessionId();
+  return Array.from(random(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, "0")).join(
+    "",
   );
+}
+
+/** Parses stored JSON, returning `undefined` for malformed values. */
+function tryParseJson(value: string): unknown {
+  try {
+    return JSON.parse(value) as unknown;
+  } catch (error) {
+    if (!(error instanceof SyntaxError)) throw error;
+    return undefined;
+  }
+}
+
+function readOwn(value: object, key: keyof StoredUser): unknown {
+  return Object.prototype.hasOwnProperty.call(value, key)
+    ? (value as Record<string, unknown>)[key]
+    : undefined;
+}
+
+/**
+ * Returns a normalized identity built only from own properties, or `undefined` when invalid.
+ * Every field is an own property so later reads never fall through to the prototype chain.
+ */
+function toStoredUser(value: unknown): StoredUserFields | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  if (Object.getPrototypeOf(value) !== Object.prototype) return undefined;
+  const anonymousId = readOwn(value, "anonymousId");
+  const authenticatedUserId = readOwn(value, "authenticatedUserId");
+  const accountId = readOwn(value, "accountId");
+  if (!isNonEmptyString(anonymousId)) return undefined;
+  if (authenticatedUserId === undefined) {
+    return accountId === undefined
+      ? { anonymousId, authenticatedUserId: undefined, accountId: undefined }
+      : undefined;
+  }
+  if (!isNonEmptyString(authenticatedUserId)) return undefined;
+  if (accountId !== undefined && !isNonEmptyString(accountId)) return undefined;
+  return { anonymousId, authenticatedUserId, accountId };
 }
 
 export interface UserContextProvider {
@@ -99,16 +138,13 @@ export function createUserContext(
       return;
     }
     if (result.value === null) return;
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(result.value);
-    } catch (error) {
-      if (!(error instanceof SyntaxError)) throw error;
+    const stored = toStoredUser(tryParseJson(result.value));
+    if (!stored) {
+      storage.removeItem(USER_STORAGE_KEY);
+      return;
     }
-    if (
-      !isStoredUser(parsed) ||
-      !storage.setItem(USER_STORAGE_KEY, JSON.stringify({ anonymousId: parsed.anonymousId }))
-    ) {
+    const anonymousOnly = JSON.stringify({ anonymousId: stored.anonymousId });
+    if (!storage.setItem(USER_STORAGE_KEY, anonymousOnly)) {
       storage.removeItem(USER_STORAGE_KEY);
     }
   }
@@ -121,16 +157,11 @@ export function createUserContext(
       if (result.value === null) {
         if (!save()) enabled = false;
       } else {
-        let parsed: unknown;
-        try {
-          parsed = JSON.parse(result.value);
-        } catch (error) {
-          if (!(error instanceof SyntaxError)) throw error;
-        }
-        if (isStoredUser(parsed)) {
-          anonymousId = parsed.anonymousId;
-          authenticatedUserId = parsed.authenticatedUserId;
-          accountId = parsed.accountId;
+        const stored = toStoredUser(tryParseJson(result.value));
+        if (stored) {
+          anonymousId = stored.anonymousId;
+          authenticatedUserId = stored.authenticatedUserId;
+          accountId = stored.accountId;
         } else {
           diag.warn("Invalid stored user identity; creating a new identity.");
           if (!save()) {

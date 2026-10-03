@@ -12,6 +12,7 @@ import {
   type MicrosoftOpenTelemetryBrowser,
   type MicrosoftOpenTelemetryBrowserOptions,
 } from "../../../src/index.js";
+import { QUOTA_WRITE_BACKOFF_MS } from "../../../src/storage/keyValueStorage.js";
 
 vi.mock("@opentelemetry/browser-sdk", { spy: true });
 
@@ -352,6 +353,39 @@ it("keeps the in-memory session if persisting later activity becomes unavailable
   expect(warn).toHaveBeenCalledExactlyOnceWith(
     "Session storage unavailable; using an in-memory session.",
   );
+});
+
+it("resumes session persistence after the quota backoff window", async () => {
+  const { emit } = await initialize();
+  const id = emit();
+  vi.spyOn(diag, "warn").mockImplementation(() => {});
+  const write = vi.spyOn(Storage.prototype, "setItem").mockImplementationOnce(() => {
+    throw new DOMException("full", "QuotaExceededError");
+  });
+  await vi.advanceTimersByTimeAsync(1000);
+  emit();
+  expect(write).toHaveBeenCalledOnce();
+
+  await vi.advanceTimersByTimeAsync(QUOTA_WRITE_BACKOFF_MS);
+  expect(emit()).toBe(id);
+  expect(write).toHaveBeenCalledTimes(2);
+  expect(JSON.parse(localStorage.getItem("opentelemetry-session")!)).toMatchObject({ id });
+});
+
+it("does not extend the quota backoff when the clock moves backwards", async () => {
+  const { emit } = await initialize();
+  vi.spyOn(diag, "warn").mockImplementation(() => {});
+  const write = vi.spyOn(Storage.prototype, "setItem").mockImplementationOnce(() => {
+    throw new DOMException("full", "QuotaExceededError");
+  });
+  await vi.advanceTimersByTimeAsync(1000);
+  emit();
+  expect(write).toHaveBeenCalledOnce();
+
+  vi.setSystemTime(Date.now() - 60 * 60_000);
+  await vi.advanceTimersByTimeAsync(1000);
+  emit();
+  expect(write).toHaveBeenCalledTimes(2);
 });
 
 it.each([

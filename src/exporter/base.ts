@@ -145,11 +145,13 @@ function createBatchRequests(
     // still sent on its own so ingestion can report a per-item failure; rejecting it locally would
     // hide that diagnostic. Only unload (beacon) exports enforce a hard aggregate limit.
     const separatorSize = batch.length === 0 ? 0 : 1;
-    const fittedEnvelope = allowMultipleBatches
-      ? envelope
+    const {
+      envelope: fittedEnvelope,
+      serialized,
+      size: serializedSize,
+    } = allowMultipleBatches
+      ? serializeEnvelope(envelope, encoder)
       : fitEnvelopeCustomFields(envelope, maxBatchSize - batchSize - separatorSize, encoder);
-    const serialized = JSON.stringify(fittedEnvelope);
-    const serializedSize = encoder.encode(serialized).byteLength;
     if (!allowMultipleBatches && serializedSize + 2 > maxBatchSize) {
       throw new RangeError(
         `Single-envelope payload size ${serializedSize + 2}, including JSON array brackets, exceeds the ${maxBatchSize} byte limit.`,
@@ -171,19 +173,32 @@ function createBatchRequests(
   return requests;
 }
 
+interface SerializedEnvelope {
+  envelope: AzureMonitorEnvelope;
+  serialized: string;
+  size: number;
+}
+
+function serializeEnvelope(
+  envelope: AzureMonitorEnvelope,
+  encoder: TextEncoder,
+): SerializedEnvelope {
+  const serialized = JSON.stringify(envelope);
+  return { envelope, serialized, size: encoder.encode(serialized).byteLength };
+}
+
 function fitEnvelopeCustomFields(
   envelope: AzureMonitorEnvelope,
   maxSerializedSize: number,
   encoder: TextEncoder,
-): AzureMonitorEnvelope {
-  if (encoder.encode(JSON.stringify(envelope)).byteLength <= maxSerializedSize) {
-    return envelope;
-  }
+): SerializedEnvelope {
+  const original = serializeEnvelope(envelope, encoder);
+  if (original.size <= maxSerializedSize) return original;
 
   const sourceBaseData = envelope.data.baseData;
   const properties = sourceBaseData.properties ? { ...sourceBaseData.properties } : undefined;
   const measurements = sourceBaseData.measurements ? { ...sourceBaseData.measurements } : undefined;
-  if (!properties && !measurements) return envelope;
+  if (!properties && !measurements) return original;
 
   const createFittedEnvelope = (): AzureMonitorEnvelope => {
     const baseData: AzureMonitorBaseData = {
@@ -196,34 +211,36 @@ function fitEnvelopeCustomFields(
       data: { ...envelope.data, baseData },
     };
   };
-  let fittedEnvelope = createFittedEnvelope();
-  const customFields: Array<{ size: number; remove: () => void }> = [];
-  if (properties) {
-    for (const key of Object.keys(properties)) {
+  const customFields: Array<{ size: number; remove: () => boolean }> = [];
+  for (const fields of [properties, measurements]) {
+    if (!fields) continue;
+    for (const key of Object.keys(fields)) {
       customFields.push({
-        size: encoder.encode(JSON.stringify([key, properties[key]])).byteLength,
-        remove: () => delete properties[key],
-      });
-    }
-  }
-  if (measurements) {
-    for (const key of Object.keys(measurements)) {
-      customFields.push({
-        size: encoder.encode(JSON.stringify([key, measurements[key]])).byteLength,
-        remove: () => delete measurements[key],
+        size: encoder.encode(JSON.stringify([key, fields[key]])).byteLength,
+        remove: () => {
+          delete fields[key];
+          return Object.keys(fields).length === 0;
+        },
       });
     }
   }
   customFields.sort((left, right) => right.size - left.size);
 
+  // Re-serialize only when the estimate might fit. Removing a defined `"key":value` entry and its
+  // comma saves exactly the `["key",value]` size minus 1 byte (undefined values save nothing), so
+  // the estimate never exceeds the real size and no fitting state is skipped. Emptying an object
+  // also drops its wrapper, so that case is always measured. The estimate starts from the
+  // normalized envelope because empty containers are omitted there.
+  let estimatedSize = serializeEnvelope(createFittedEnvelope(), encoder).size;
   for (const field of customFields) {
-    field.remove();
-    fittedEnvelope = createFittedEnvelope();
-    if (encoder.encode(JSON.stringify(fittedEnvelope)).byteLength <= maxSerializedSize) {
-      return fittedEnvelope;
-    }
+    const emptied = field.remove();
+    estimatedSize -= field.size - 1;
+    if (!emptied && estimatedSize > maxSerializedSize) continue;
+    const fitted = serializeEnvelope(createFittedEnvelope(), encoder);
+    if (fitted.size <= maxSerializedSize) return fitted;
+    estimatedSize = fitted.size;
   }
-  return fittedEnvelope;
+  return serializeEnvelope(createFittedEnvelope(), encoder);
 }
 
 function toExportResult(results: readonly SenderResultType[]): ExportResult {

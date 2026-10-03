@@ -56,12 +56,14 @@ const promotedPageViewAttributes = /* @__PURE__ */ new Set([
   ATTR_PAGE_VIEW_REFERRER,
   URL_FULL,
 ]);
+// Azure Monitor ExceptionDetails schema limits (character lengths).
 const MAX_EXCEPTION_TYPE_LENGTH = 1024;
 const MAX_EXCEPTION_MESSAGE_LENGTH = 32 * 1024;
 const MAX_EXCEPTION_STACK_LENGTH = 32 * 1024;
+const MAX_STACK_FRAME_FIELD_LENGTH = 1024;
+// Distro byte budgets that keep the raw and parsed stacks from crowding out each other.
 const MAX_EXCEPTION_STACK_SIZE_IN_BYTES = 32 * 1024;
 const MAX_PARSED_STACK_SIZE_IN_BYTES = 32 * 1024;
-const MAX_STACK_FRAME_FIELD_LENGTH = 1024;
 // Budgets core exception data (message, stack, parsed frames) to fit the unload beacon limit.
 // Custom fields are intentionally excluded: they are optional, so during unload the exporter's
 // custom-field fitting drops the largest ones first instead of truncating the exception here.
@@ -222,6 +224,77 @@ function parseStack(stack: string, maxSizeInBytes: number): readonly StackFrame[
   return capped.length === 0 ? undefined : capped;
 }
 
+/**
+ * Builds a single ExceptionDetails entry whose JSON fits in `maxSizeInBytes`.
+ *
+ * Fields are first truncated to Azure Monitor schema lengths. The remaining byte budget is then
+ * allocated in priority order: type name, raw stack (up to its distro byte cap), message, and
+ * finally parsed frames from whatever space is left.
+ */
+function createExceptionDetails(
+  attributes: ReadableLogRecord["attributes"],
+  body: ReadableLogRecord["body"],
+  maxSizeInBytes: number,
+): ExceptionData["exceptions"][number] {
+  const stack = attributes[EXCEPTION_STACKTRACE];
+  const serializedStack = stack === undefined ? undefined : serializeAttribute(stack);
+  const typeName = truncateToLength(
+    serializeAttribute(attributes[EXCEPTION_TYPE] ?? "Error"),
+    MAX_EXCEPTION_TYPE_LENGTH,
+  );
+  const schemaLimitedMessage = truncateToLength(
+    serializeAttribute(attributes[EXCEPTION_MESSAGE] ?? body ?? "Exception"),
+    MAX_EXCEPTION_MESSAGE_LENGTH,
+  );
+  const schemaLimitedStack =
+    serializedStack === undefined
+      ? undefined
+      : truncateToLength(serializedStack, MAX_EXCEPTION_STACK_LENGTH);
+  const emptyStringSize = getUtf8Size(JSON.stringify(""));
+  const exceptionWithEmptyStrings = {
+    typeName,
+    message: "",
+    hasFullStack: false,
+    ...(schemaLimitedStack === undefined ? {} : { stack: "" }),
+  };
+  const availableStringSize =
+    maxSizeInBytes -
+    getUtf8Size(JSON.stringify(exceptionWithEmptyStrings)) +
+    emptyStringSize * (schemaLimitedStack === undefined ? 1 : 2);
+  const stackSize =
+    schemaLimitedStack === undefined
+      ? 0
+      : Math.min(
+          getUtf8Size(JSON.stringify(schemaLimitedStack)),
+          MAX_EXCEPTION_STACK_SIZE_IN_BYTES,
+          Math.max(emptyStringSize, availableStringSize),
+        );
+  const messageSize =
+    schemaLimitedStack === undefined
+      ? availableStringSize
+      : Math.max(emptyStringSize, availableStringSize - stackSize);
+  const message = truncateJsonStringToSize(schemaLimitedMessage, messageSize) ?? "";
+  const emittedStack =
+    schemaLimitedStack === undefined
+      ? undefined
+      : truncateJsonStringToSize(schemaLimitedStack, stackSize);
+  const exception = {
+    typeName,
+    message,
+    hasFullStack: Boolean(serializedStack) && emittedStack === serializedStack,
+    stack: emittedStack,
+  };
+  const parsedStackSize = Math.min(
+    MAX_PARSED_STACK_SIZE_IN_BYTES,
+    maxSizeInBytes - getUtf8Size(JSON.stringify(exception)) - getUtf8Size(',"parsedStack":'),
+  );
+  const parsedStack =
+    serializedStack === undefined || parsedStackSize < 2
+      ? undefined
+      : parseStack(serializedStack, parsedStackSize);
+  return { ...exception, parsedStack };
+}
+
 export function logToEnvelope(
   logRecord: ReadableLogRecord,
   instrumentationKey: string,
@@ -261,70 +334,9 @@ export function logToEnvelope(
       MAX_EXCEPTION_ENVELOPE_SIZE_IN_BYTES -
       2 -
       getUtf8Size(JSON.stringify(envelopeWithoutException));
-    const stack = logRecord.attributes[EXCEPTION_STACKTRACE];
-    const serializedStack = stack === undefined ? undefined : serializeAttribute(stack);
-    const typeName = truncateToLength(
-      serializeAttribute(logRecord.attributes[EXCEPTION_TYPE] ?? "Error"),
-      MAX_EXCEPTION_TYPE_LENGTH,
-    );
-    const schemaLimitedMessage = truncateToLength(
-      serializeAttribute(logRecord.attributes[EXCEPTION_MESSAGE] ?? logRecord.body ?? "Exception"),
-      MAX_EXCEPTION_MESSAGE_LENGTH,
-    );
-    const schemaLimitedStack =
-      serializedStack === undefined
-        ? undefined
-        : truncateToLength(serializedStack, MAX_EXCEPTION_STACK_LENGTH);
-    const emptyStringSize = getUtf8Size(JSON.stringify(""));
-    const exceptionWithEmptyStrings = {
-      typeName,
-      message: "",
-      hasFullStack: false,
-      ...(schemaLimitedStack === undefined ? {} : { stack: "" }),
-    };
-    const availableStringSize =
-      maxExceptionSize -
-      getUtf8Size(JSON.stringify(exceptionWithEmptyStrings)) +
-      emptyStringSize * (schemaLimitedStack === undefined ? 1 : 2);
-    const stackSize =
-      schemaLimitedStack === undefined
-        ? 0
-        : Math.min(
-            getUtf8Size(JSON.stringify(schemaLimitedStack)),
-            MAX_EXCEPTION_STACK_SIZE_IN_BYTES,
-            Math.max(emptyStringSize, availableStringSize),
-          );
-    const messageSize =
-      schemaLimitedStack === undefined
-        ? availableStringSize
-        : Math.max(emptyStringSize, availableStringSize - stackSize);
-    const message = truncateJsonStringToSize(schemaLimitedMessage, messageSize) ?? "";
-    const emittedStack =
-      schemaLimitedStack === undefined
-        ? undefined
-        : truncateJsonStringToSize(schemaLimitedStack, stackSize);
-    const exception = {
-      typeName,
-      message,
-      hasFullStack: Boolean(serializedStack) && emittedStack === serializedStack,
-      stack: emittedStack,
-    };
-    const parsedStackSize = Math.min(
-      MAX_PARSED_STACK_SIZE_IN_BYTES,
-      maxExceptionSize - getUtf8Size(JSON.stringify(exception)) - getUtf8Size(',"parsedStack":'),
-    );
-    const parsedStack =
-      serializedStack === undefined || parsedStackSize < 2
-        ? undefined
-        : parseStack(serializedStack, parsedStackSize);
     baseData = {
       ...baseDataWithoutException,
-      exceptions: [
-        {
-          ...exception,
-          parsedStack,
-        },
-      ],
+      exceptions: [createExceptionDetails(logRecord.attributes, logRecord.body, maxExceptionSize)],
       ...customFields,
     };
   } else if (isPageView(logRecord.eventName)) {

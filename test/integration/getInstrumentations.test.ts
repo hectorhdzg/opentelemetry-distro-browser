@@ -202,9 +202,14 @@ describe("configured instrumentations in a browser", () => {
 
     const rejected = new Error("payment rejected");
     rejected.stack = "Error: payment rejected\n    at submitPayment (https://shop.test/pay.js:8:3)";
-    const rejection = new Event("unhandledrejection");
-    Object.defineProperty(rejection, "reason", { value: rejected });
-    window.dispatchEvent(rejection);
+    const rejectedPromise = Promise.reject(rejected);
+    rejectedPromise.catch(() => undefined);
+    window.dispatchEvent(
+      new PromiseRejectionEvent("unhandledrejection", {
+        promise: rejectedPromise,
+        reason: rejected,
+      }),
+    );
 
     window.dispatchEvent(new ErrorEvent("error", { message: "Script error." }));
 

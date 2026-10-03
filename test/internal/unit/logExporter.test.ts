@@ -15,6 +15,7 @@ const connectionString =
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 function exportLogs(

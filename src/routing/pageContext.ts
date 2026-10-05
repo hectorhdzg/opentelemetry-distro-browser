@@ -23,6 +23,11 @@ interface ContextOwner {
 // Tracing instances in initialization order; the first with page views supplies correlation.
 const owners: ContextOwner[] = [];
 let storage: ContextManager | undefined;
+// Cached because active() is on the hot path; updated whenever owners change.
+let correlation: PageCorrelation | undefined;
+const updateCorrelation = () => {
+  correlation = owners.find((owner) => owner.correlation)?.correlation;
+};
 
 /**
  * The page-lifetime context manager. The OpenTelemetry API allows only one registration, so
@@ -32,7 +37,6 @@ let storage: ContextManager | undefined;
  */
 const pageContextManager: ContextManager = {
   active() {
-    const correlation = owners.find((owner) => owner.correlation)?.correlation;
     const active = storage?.active() ?? ROOT_CONTEXT;
     return correlation ? correlation.decorate(active) : withoutPageOperation(active);
   },
@@ -73,9 +77,11 @@ export function addContextOwner(
     }
   }
   owners.push(owner);
+  updateCorrelation();
   return () => {
     const index = owners.indexOf(owner);
     if (index >= 0) owners.splice(index, 1);
+    updateCorrelation();
   };
 }
 

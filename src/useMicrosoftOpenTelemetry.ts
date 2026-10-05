@@ -66,6 +66,11 @@ function createOwnedInstrumentations(
  * Captures the initial page operation from the supplied manager or global context before awaiting
  * session restoration, so synchronous context scopes are preserved.
  * Await completion before emitting telemetry.
+ *
+ * @remarks
+ * Like the upstream OpenTelemetry browser SDK, the first initialization on a page installs a
+ * console logger at INFO level for the global `diag` API, replacing any diagnostic logger set
+ * earlier. Call `diag.setLogger` after initialization to use your own logger or level.
  * @public
  */
 export async function useMicrosoftOpenTelemetry(

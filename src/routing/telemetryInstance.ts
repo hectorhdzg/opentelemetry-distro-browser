@@ -60,6 +60,7 @@ export async function startTelemetryInstance(
   options: TelemetryInstanceOptions,
 ): Promise<TelemetryInstance> {
   // Matches the upstream browser SDK, which installs a console diagnostic logger once per page.
+  // Documented on useMicrosoftOpenTelemetry; applications can replace it after initialization.
   if (!diagLoggerSet) {
     diagLoggerSet = true;
     diag.setLogger(new DiagConsoleLogger(), DiagLogLevel.INFO);

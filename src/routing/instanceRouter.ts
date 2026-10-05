@@ -23,6 +23,11 @@ export interface InstancePipelines {
 // Running instances in initialization order; per signal, the first that collects it is the default.
 const running: InstancePipelines[] = [];
 const SELECTED_INSTANCE = createContextKey("@microsoft/opentelemetry-browser instance");
+// Signals already reported as dropped; cleared when an instance starts.
+const reportedDrops = new Set<keyof InstancePipelines>();
+// Providers registered by another SDK that the routers already deferred to.
+let foreignTracerProvider: unknown;
+let foreignLoggerProvider: unknown;
 
 /** Hands out no-op tracers: a proxy without a delegate never records. */
 export const noopTracerProvider: TracerProvider = /* @__PURE__ */ new ProxyTracerProvider();
@@ -43,7 +48,8 @@ function selectProvider<K extends keyof InstancePipelines>(
       ? selected
       : undefined
     : running.find((candidate) => candidate[signal]);
-  if (!instance) {
+  if (!instance && !reportedDrops.has(signal)) {
+    reportedDrops.add(signal);
     diag.warn("No running @microsoft/opentelemetry-browser instance; its telemetry is dropped");
   }
   return instance?.[signal];
@@ -66,26 +72,34 @@ const loggerRouter: LoggerProvider = {
 
 /**
  * Adds an instance to the routing table and registers the global router for each signal it
- * collects. Never replaces a provider registered by another SDK.
+ * collects. Never replaces a provider registered by another SDK, and attempts registration only
+ * once per conflicting provider.
  *
  * @returns Removes the instance from routing. Tracers and loggers already bound to it stay bound
  * to its own pipelines rather than moving to another instance.
  */
 export function addInstance(instance: InstancePipelines): () => void {
+  const tracerDelegate = () => (trace.getTracerProvider() as ProxyTracerProvider).getDelegate?.();
   if (
     instance.tracerProvider &&
-    (trace.getTracerProvider() as ProxyTracerProvider).getDelegate?.() !== tracerRouter
-  ) {
+    tracerDelegate() !== tracerRouter &&
+    tracerDelegate() !== foreignTracerProvider &&
     // The API reports a conflicting registration itself.
-    trace.setGlobalTracerProvider(tracerRouter);
+    !trace.setGlobalTracerProvider(tracerRouter)
+  ) {
+    foreignTracerProvider = tracerDelegate();
   }
+  const loggerProvider = logs.getLoggerProvider();
   if (
     instance.loggerProvider &&
-    logs.getLoggerProvider() !== loggerRouter &&
+    loggerProvider !== loggerRouter &&
+    loggerProvider !== foreignLoggerProvider &&
     logs.setGlobalLoggerProvider(loggerRouter) !== loggerRouter
   ) {
+    foreignLoggerProvider = logs.getLoggerProvider();
     diag.warn("Another OpenTelemetry LoggerProvider is registered; it serves the global Logs API");
   }
+  reportedDrops.clear();
   running.push(instance);
   return () => {
     const index = running.indexOf(instance);

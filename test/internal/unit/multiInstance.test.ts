@@ -10,7 +10,7 @@ import {
   type ContextManager,
   type TracerProvider,
 } from "@opentelemetry/api";
-import { logs, type LoggerProvider } from "@opentelemetry/api-logs";
+import { createNoopLogger, logs, type LoggerProvider } from "@opentelemetry/api-logs";
 import { BasicTracerProvider } from "@opentelemetry/sdk-trace-base";
 import { afterEach, expect, it, vi } from "vitest";
 import {
@@ -351,4 +351,37 @@ it("shuts down its providers and registers nothing when context startup fails", 
   const alpha = await start();
   alpha.probe.record("alpha");
   expect(await alpha.exported()).toEqual({ spans: ["alpha"], logs: ["alpha"] });
+});
+
+it("reports dropped telemetry once per signal until an instance starts", async () => {
+  const alpha = await start();
+  await alpha.handle.shutdown();
+  const warn = vi.spyOn(diag, "warn").mockImplementation(() => {});
+
+  for (let i = 0; i < 3; i++) {
+    trace.getTracer(SCOPE);
+    logs.getLogger(SCOPE);
+  }
+  expect(warn).toHaveBeenCalledTimes(2);
+
+  const beta = await start();
+  await beta.handle.shutdown();
+  trace.getTracer(SCOPE);
+  expect(warn).toHaveBeenCalledTimes(3);
+});
+
+it("attempts registration once per provider registered by another SDK", async () => {
+  trace.setGlobalTracerProvider(new BasicTracerProvider());
+  vi.spyOn(diag, "error").mockImplementation(() => {});
+  const warn = vi.spyOn(diag, "warn").mockImplementation(() => {});
+  logs.setGlobalLoggerProvider({ getLogger: () => createNoopLogger() });
+  const registerTracer = vi.spyOn(trace, "setGlobalTracerProvider");
+  const registerLogger = vi.spyOn(logs, "setGlobalLoggerProvider");
+
+  await start();
+  await start();
+
+  expect(registerTracer).toHaveBeenCalledOnce();
+  expect(registerLogger).toHaveBeenCalledOnce();
+  expect(warn).toHaveBeenCalledOnce();
 });

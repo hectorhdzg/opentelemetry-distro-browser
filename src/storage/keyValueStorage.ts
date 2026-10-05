@@ -5,7 +5,7 @@ import { diag } from "@opentelemetry/api";
 
 type StorageReadResult = { success: true; value: string | null } | { success: false };
 
-export const QUOTA_WRITE_BACKOFF_MS = 60_000;
+export const WRITE_BACKOFF_MS = 60_000;
 
 /**
  * Minimal persistence contract shared by browser context managers.
@@ -20,7 +20,7 @@ export interface KeyValueStorage {
 }
 
 export function createLocalStorageKeyValueStorage(unavailableMessage: string): KeyValueStorage {
-  // Quota exhaustion is often temporary; pause writes briefly instead of retrying every activity.
+  // After a quota or security write failure, pause writes briefly instead of retrying every activity.
   let writesPausedUntil = 0;
   let warned = false;
 
@@ -40,7 +40,7 @@ export function createLocalStorageKeyValueStorage(unavailableMessage: string): K
     if (
       operationType === "write" &&
       now < writesPausedUntil &&
-      now >= writesPausedUntil - QUOTA_WRITE_BACKOFF_MS
+      now >= writesPausedUntil - WRITE_BACKOFF_MS
     ) {
       return fallback;
     }
@@ -61,8 +61,8 @@ export function createLocalStorageKeyValueStorage(unavailableMessage: string): K
       if (errorName !== "SecurityError" && errorName !== "QuotaExceededError") {
         throw error;
       }
-      if (operationType === "write" && errorName === "QuotaExceededError") {
-        writesPausedUntil = Date.now() + QUOTA_WRITE_BACKOFF_MS;
+      if (operationType === "write") {
+        writesPausedUntil = Date.now() + WRITE_BACKOFF_MS;
       }
     }
     warnOnce();

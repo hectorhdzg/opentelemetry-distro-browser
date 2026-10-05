@@ -233,7 +233,9 @@ export interface MicrosoftOpenTelemetryBrowserUserContext {
   /**
    * Enables or disables persistence without changing the current in-memory identity. Disabling
    * also removes identity persisted by earlier page loads. The stored record is shared by every
-   * handle in the origin, so disabling or signing out through any handle affects it for all.
+   * handle in the origin, so disabling or signing out through any handle changes that record for
+   * future page loads. Each active handle keeps its own in-memory identity, so update every active
+   * handle to change the identity it applies to telemetry.
    *
    * @throws Error when enabling cannot save identity, or when disabling cannot remove identity
    * this instance persisted.

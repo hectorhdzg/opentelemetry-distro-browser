@@ -107,8 +107,8 @@ export function createUserContext(
   }
 
   /**
-   * Saves the current identity. A failed write removes the stale record, which also lets the
-   * storage adapter recover from quota exhaustion, then retries once. Returns `false` only after
+   * Saves the current identity. A failed write removes the stale record, which also frees space
+   * and ends the storage adapter's write backoff, then retries once. Returns `false` only after
    * the stale record was removed, so a later page load cannot restore superseded identity.
    */
   function persist(): boolean {

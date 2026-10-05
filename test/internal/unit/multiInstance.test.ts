@@ -1,0 +1,238 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
+import {
+  context,
+  diag,
+  propagation,
+  ROOT_CONTEXT,
+  trace,
+  type ContextManager,
+  type TracerProvider,
+} from "@opentelemetry/api";
+import { logs, type LoggerProvider } from "@opentelemetry/api-logs";
+import { BasicTracerProvider } from "@opentelemetry/sdk-trace-base";
+import { afterEach, expect, it, vi } from "vitest";
+import {
+  useMicrosoftOpenTelemetry,
+  type BrowserInstrumentation,
+  type MicrosoftOpenTelemetryBrowser,
+  type MicrosoftOpenTelemetryBrowserOptions,
+} from "../../../src/index.js";
+import { addInstance, withInstance } from "../../../src/routing/instanceRouter.js";
+import { createInMemoryPipeline } from "../../fixtures/telemetry.js";
+
+vi.mock("../../../src/routing/instanceRouter.js", { spy: true });
+
+const handles = new Set<MicrosoftOpenTelemetryBrowser>();
+
+afterEach(async () => {
+  const results = await Promise.allSettled([...handles].map((handle) => handle.shutdown()));
+  handles.clear();
+  trace.disable();
+  logs.disable();
+  propagation.disable();
+  context.disable();
+  diag.disable();
+  vi.restoreAllMocks();
+  vi.mocked(addInstance).mockClear();
+  for (const result of results) {
+    if (result.status === "rejected") throw result.reason;
+  }
+});
+
+const SCOPE = "shared-instrumentation";
+
+/** An instrumentation that records through whichever providers it was bound to. */
+function createProbe() {
+  let tracerProvider: TracerProvider | undefined;
+  let loggerProvider: LoggerProvider | undefined;
+  return {
+    setTracerProvider: (provider: TracerProvider) => (tracerProvider = provider),
+    setLoggerProvider: (provider: LoggerProvider) => (loggerProvider = provider),
+    getConfig: () => ({ enabled: false }),
+    enable() {},
+    disable() {},
+    record(name: string) {
+      tracerProvider?.getTracer(SCOPE, "1.0.0").startSpan(name).end();
+      loggerProvider?.getLogger(SCOPE, "1.0.0").emit({ eventName: name });
+    },
+  } satisfies BrowserInstrumentation & { record(name: string): void };
+}
+
+async function start(options: MicrosoftOpenTelemetryBrowserOptions = {}) {
+  const pipeline = createInMemoryPipeline();
+  const probe = createProbe();
+  const handle = await useMicrosoftOpenTelemetry({
+    spanProcessors: pipeline.options.spanProcessors,
+    logRecordProcessors: pipeline.options.logRecordProcessors,
+    pageView: { enabled: false },
+    instrumentations: [probe],
+    ...options,
+  });
+  handles.add(handle);
+  const pipelines = vi.mocked(addInstance).mock.lastCall![0];
+  return {
+    handle,
+    probe,
+    pipelines,
+    async exported() {
+      await pipeline.forceFlush();
+      return {
+        spans: pipeline.spanExporter.getFinishedSpans().map((span) => span.name),
+        logs: pipeline.logExporter.getFinishedLogRecords().map((record) => record.eventName),
+      };
+    },
+  };
+}
+
+it("keeps instrumentation telemetry in its own instance when scope names are identical", async () => {
+  const alpha = await start();
+  const beta = await start();
+
+  alpha.probe.record("alpha");
+  beta.probe.record("beta");
+
+  expect(await alpha.exported()).toEqual({ spans: ["alpha"], logs: ["alpha"] });
+  expect(await beta.exported()).toEqual({ spans: ["beta"], logs: ["beta"] });
+});
+
+it("binds global tracers and loggers to the selected instance at acquisition", async () => {
+  const alpha = await start();
+  const beta = await start();
+  const tracer = withInstance(beta.pipelines, () => trace.getTracer(SCOPE));
+  const logger = withInstance(beta.pipelines, () => logs.getLogger(SCOPE));
+
+  withInstance(alpha.pipelines, () => {
+    tracer.startSpan("beta").end();
+    logger.emit({ eventName: "beta" });
+  });
+  trace.getTracer(SCOPE).startSpan("default").end();
+  logs.getLogger(SCOPE).emit({ eventName: "default" });
+
+  expect(await alpha.exported()).toEqual({ spans: ["default"], logs: ["default"] });
+  expect(await beta.exported()).toEqual({ spans: ["beta"], logs: ["beta"] });
+});
+
+it("keeps explicit async parents within each overlapping instance", async () => {
+  const alpha = await start();
+  const beta = await start();
+  const run = async (instance: typeof alpha) => {
+    const tracer = withInstance(instance.pipelines, () => trace.getTracer(SCOPE));
+    const parent = tracer.startSpan("parent");
+    const parentContext = trace.setSpan(context.active(), parent);
+    await new Promise((resolve) => setTimeout(resolve));
+    const child = tracer.startSpan("child", {}, parentContext);
+    child.end();
+    parent.end();
+    return { parent: parent.spanContext(), child };
+  };
+
+  const [alphaRun, betaRun] = await Promise.all([run(alpha), run(beta)]);
+
+  for (const { parent, child } of [alphaRun, betaRun]) {
+    expect(child.spanContext().traceId).toBe(parent.traceId);
+    expect(
+      (child as unknown as { parentSpanContext?: { spanId: string } }).parentSpanContext,
+    ).toMatchObject({ spanId: parent.spanId });
+  }
+  expect(alphaRun.parent.traceId).not.toBe(betaRun.parent.traceId);
+  expect(await alpha.exported()).toEqual({ spans: ["child", "parent"], logs: [] });
+  expect(await beta.exported()).toEqual({ spans: ["child", "parent"], logs: [] });
+});
+
+it("routes new acquisitions to the next running instance without moving bound tracers", async () => {
+  const alpha = await start();
+  const beta = await start();
+  const alphaTracer = trace.getTracer(SCOPE);
+  const alphaLogger = logs.getLogger(SCOPE);
+
+  await alpha.handle.shutdown();
+  alphaTracer.startSpan("stale").end();
+  alphaLogger.emit({ eventName: "stale" });
+  trace.getTracer(SCOPE).startSpan("after").end();
+  logs.getLogger(SCOPE).emit({ eventName: "after" });
+
+  expect(await beta.exported()).toEqual({ spans: ["after"], logs: ["after"] });
+});
+
+it("never serves a signal an instance does not collect from another instance", async () => {
+  const logsOnly = await start({ spanProcessors: [] });
+  const both = await start();
+
+  logsOnly.probe.record("logs-only");
+  const span = trace.getTracer(SCOPE).startSpan("default");
+  span.end();
+
+  expect(span.isRecording()).toBe(false);
+  expect(await logsOnly.exported()).toEqual({ spans: [], logs: ["logs-only"] });
+  expect(await both.exported()).toEqual({ spans: [], logs: [] });
+});
+
+it("drops and reports telemetry acquired when no instance is running", async () => {
+  const alpha = await start();
+  await alpha.handle.shutdown();
+  const warn = vi.spyOn(diag, "warn").mockImplementation(() => {});
+
+  const span = trace.getTracer(SCOPE).startSpan("orphan");
+  span.end();
+  const logger = logs.getLogger(SCOPE);
+
+  expect(span.isRecording()).toBe(false);
+  expect(logger.enabled()).toBe(false);
+  expect(warn).toHaveBeenCalledTimes(2);
+  expect(await alpha.exported()).toEqual({ spans: [], logs: [] });
+});
+
+it("routes to a new instance after every earlier instance has shut down", async () => {
+  const first = await start();
+  await first.handle.shutdown();
+  const second = await start();
+
+  trace.getTracer(SCOPE).startSpan("second").end();
+
+  expect(await second.exported()).toEqual({ spans: ["second"], logs: [] });
+});
+
+it("does not replace a tracer provider registered by another SDK", async () => {
+  const foreign = new BasicTracerProvider();
+  trace.setGlobalTracerProvider(foreign);
+  const report = vi.spyOn(diag, "error").mockImplementation(() => {});
+  const alpha = await start();
+
+  alpha.probe.record("alpha");
+
+  expect((trace.getTracerProvider() as unknown as { getDelegate(): unknown }).getDelegate()).toBe(
+    foreign,
+  );
+  expect(report).toHaveBeenCalled();
+  expect(await alpha.exported()).toEqual({ spans: ["alpha"], logs: ["alpha"] });
+});
+
+it("keeps the first instance's page context and reports unused context options", async () => {
+  const first = vi.fn(() => ROOT_CONTEXT);
+  const contextManager = (active: () => ReturnType<ContextManager["active"]>) =>
+    ({
+      active,
+      bind: (_ctx, target) => target,
+      disable() {
+        return this;
+      },
+      enable() {
+        return this;
+      },
+      with: (_ctx, callback, thisArg, ...args) => callback.apply(thisArg, args),
+    }) satisfies ContextManager;
+  await start({ traces: { contextManager: contextManager(first) } });
+  const warn = vi.spyOn(diag, "warn").mockImplementation(() => {});
+  const second = vi.fn(() => ROOT_CONTEXT);
+
+  await start({ traces: { contextManager: contextManager(second) } });
+  context.active();
+
+  expect(first).toHaveBeenCalled();
+  expect(second).not.toHaveBeenCalled();
+  expect(warn).toHaveBeenCalledExactlyOnceWith(
+    "Trace context options are unused while another instance owns the page context",
+  );
+});

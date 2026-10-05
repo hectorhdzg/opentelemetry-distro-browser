@@ -96,9 +96,10 @@ export interface BrowserInstrumentation {
  * context manager (or an upstream synchronous stack manager) and supplies the page operation only
  * when there is no active span. Pass explicit context across asynchronous boundaries.
  *
- * The OpenTelemetry global context and propagation APIs are page-lifetime registrations. Like the
- * tracer and logger providers, they are not unregistered by `shutdown`; initialize this
- * distribution once per page.
+ * The OpenTelemetry global context and propagation APIs are page-lifetime registrations that
+ * `shutdown` does not unregister. Each initialization owns its own telemetry pipelines, but only
+ * the first instance that collects traces registers context and propagation; options supplied to
+ * later instances while it runs are unused.
  *
  * @public
  */
@@ -185,7 +186,8 @@ export interface MicrosoftOpenTelemetryBrowser {
   forceFlush(): Promise<void>;
   /**
    * Stops session timers immediately, then disables registered instrumentations and shuts down
-   * trace and log providers.
+   * this instance's trace and log providers. Other instances keep running, and tracers or
+   * loggers acquired afterward from the global APIs use the earliest remaining instance.
    * Does not unregister global APIs. Cleanup continues if an instrumentation throws,
    * and the returned promise rejects with the cleanup failure(s).
    */

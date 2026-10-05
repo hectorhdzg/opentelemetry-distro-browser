@@ -1,9 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { context, diag, trace } from "@opentelemetry/api";
-import { logs } from "@opentelemetry/api-logs";
-import { startBrowserSdk } from "@opentelemetry/browser-sdk";
+import { context, diag } from "@opentelemetry/api";
+import { OTLPLogExporter } from "@opentelemetry/exporter-logs-otlp-http";
+import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
 import { SessionLogRecordProcessor, SessionSpanProcessor } from "./session/sessionProcessors.js";
 import { createSession } from "./session/createSession.js";
 import {
@@ -21,6 +21,8 @@ import {
   ATTR_TELEMETRY_DISTRO_VERSION,
 } from "@opentelemetry/semantic-conventions";
 import { OPENTELEMETRY_BROWSER_VERSION } from "./shared/constants.js";
+import { isTracingRunning } from "./routing/instanceRouter.js";
+import { startTelemetryInstance, type TelemetryInstance } from "./routing/telemetryInstance.js";
 import type {
   MicrosoftOpenTelemetryBrowser,
   MicrosoftOpenTelemetryBrowserOptions,
@@ -99,7 +101,7 @@ export async function useMicrosoftOpenTelemetry(
     : undefined;
   // Publish the initial page operation before caller instrumentations can emit.
   const instrumentations = [...owned, ...(options.instrumentations ?? [])];
-  let sdk: ReturnType<typeof startBrowserSdk> | undefined;
+  let instance: TelemetryInstance | undefined;
   let stopping = false;
   // Upstream stale tracers can still call processors after provider shutdown.
   const sessionProvider = {
@@ -165,7 +167,7 @@ export async function useMicrosoftOpenTelemetry(
       } catch (error) {
         errors.push(error);
       }
-      for (let i = sdk ? instrumentations.length - 1 : -1; i >= 0; i--) {
+      for (let i = instance ? instrumentations.length - 1 : -1; i >= 0; i--) {
         try {
           instrumentations[i].disable();
         } catch (error) {
@@ -182,7 +184,7 @@ export async function useMicrosoftOpenTelemetry(
         }
       }
       try {
-        await sdk?.shutdown();
+        await instance?.shutdown();
       } catch (error) {
         errors.push(error);
       }
@@ -195,51 +197,48 @@ export async function useMicrosoftOpenTelemetry(
 
   try {
     await session?.start();
+    const spanContextProcessors = session ? [new SessionSpanProcessor(sessionProvider)] : [];
     const logContextProcessors = [
       ...(session ? [new SessionLogRecordProcessor(sessionProvider)] : []),
       ...(correlation ? [correlation] : []),
     ];
-    sdk = startBrowserSdk({
-      // Spread last: the caller's attributes win, and each call gets a fresh object because the
-      // SDK mutates this one in place and shares it between the traces and logs SDKs.
+    if ((traceOptions?.contextManager || traceOptions?.propagators) && isTracingRunning()) {
+      diag.warn("Trace context options are unused while another instance owns the page context");
+    }
+    instance = startTelemetryInstance({
+      // Spread last: the caller's attributes win.
       resourceAttributes: {
         [ATTR_TELEMETRY_DISTRO_NAME]: "@microsoft/opentelemetry-browser",
         [ATTR_TELEMETRY_DISTRO_VERSION]: OPENTELEMETRY_BROWSER_VERSION,
         ...options.resource?.attributes,
       },
-      traces: {
-        ...(correlation
-          ? { contextManager: correlation }
-          : traceOptions?.contextManager === undefined
-            ? {}
-            : { contextManager: traceOptions.contextManager }),
-        ...(traceOptions?.propagators === undefined
-          ? {}
-          : { propagators: traceOptions.propagators.slice() }),
-        processors:
-          session && spanProcessors?.length !== 0
-            ? [new SessionSpanProcessor(sessionProvider), ...(spanProcessors ?? [])]
-            : spanProcessors,
-        // Supplying enrichment processors must not disable upstream default export.
-        ...(session && spanProcessors === undefined ? { exportConfig: {} } : {}),
-      },
-      logs: {
-        processors:
-          logContextProcessors.length && logRecordProcessors?.length !== 0
-            ? [...logContextProcessors, ...(logRecordProcessors ?? [])]
-            : logRecordProcessors,
-        ...(logContextProcessors.length && logRecordProcessors === undefined
-          ? { exportConfig: {} }
-          : {}),
-      },
+      // An empty caller list turns the signal off. Otherwise enrichment runs first, and omitting
+      // the list keeps the upstream default OTLP export.
+      spanProcessors:
+        spanProcessors?.length === 0
+          ? []
+          : [
+              ...spanContextProcessors,
+              ...(spanProcessors ?? [new BatchSpanProcessor(new OTLPTraceExporter())]),
+            ],
+      logRecordProcessors:
+        logRecordProcessors?.length === 0
+          ? []
+          : [
+              ...logContextProcessors,
+              ...(logRecordProcessors ?? [
+                new BatchLogRecordProcessor({ exporter: new OTLPLogExporter() }),
+              ]),
+            ],
+      contextManager: correlation ?? traceOptions?.contextManager,
+      propagators: traceOptions?.propagators,
     });
-    if (instrumentations.length === 0) return handle;
 
-    const tracerProvider = trace.getTracerProvider();
-    const loggerProvider = logs.getLoggerProvider();
+    // Bind to this instance's own providers, never the global router, so collection stays in
+    // this instance's pipelines whichever instance is the default route.
     for (const instrumentation of instrumentations) {
-      instrumentation.setTracerProvider(tracerProvider);
-      instrumentation.setLoggerProvider?.(loggerProvider);
+      instrumentation.setTracerProvider(instance.tracerProvider);
+      instrumentation.setLoggerProvider?.(instance.loggerProvider);
       if (!instrumentation.getConfig().enabled) instrumentation.enable();
     }
   } catch (error) {

@@ -292,6 +292,18 @@ it("force flushes both signal processors", async () => {
   expect(logFlush).toHaveBeenCalledOnce();
 });
 
+it("force flushes the default OTLP export when no processors are supplied", async () => {
+  const spanFlush = vi.spyOn(BatchSpanProcessor.prototype, "forceFlush");
+  const logFlush = vi.spyOn(BatchLogRecordProcessor.prototype, "forceFlush");
+  const handle = await useMicrosoftOpenTelemetry({ pageView: { enabled: false } });
+  handles.add(handle);
+
+  await handle.forceFlush();
+
+  expect(spanFlush).toHaveBeenCalledOnce();
+  expect(logFlush).toHaveBeenCalledOnce();
+});
+
 it("coalesces concurrent force flushes across both signals", async () => {
   let finishFlush!: () => void;
   const pendingFlush = new Promise<void>((resolve) => {

@@ -187,7 +187,8 @@ export interface MicrosoftOpenTelemetryBrowser {
   /**
    * Stops session timers immediately, then disables registered instrumentations and shuts down
    * this instance's trace and log providers. Other instances keep running, and tracers or
-   * loggers acquired afterward from the global APIs use the earliest remaining instance.
+   * loggers acquired afterward from the global APIs use the earliest remaining instance that
+   * collects that signal.
    * Does not unregister global APIs. Cleanup continues if an instrumentation throws,
    * and the returned promise rejects with the cleanup failure(s).
    */

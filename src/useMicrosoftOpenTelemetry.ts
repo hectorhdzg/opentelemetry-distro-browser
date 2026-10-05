@@ -102,6 +102,8 @@ export async function useMicrosoftOpenTelemetry(
   // Publish the initial page operation before caller instrumentations can emit.
   const instrumentations = [...owned, ...(options.instrumentations ?? [])];
   let instance: TelemetryInstance | undefined;
+  // Default OTLP export created when the caller supplies no processors for a signal.
+  const defaultProcessors: Array<{ forceFlush(): Promise<void> }> = [];
   let stopping = false;
   // Upstream stale tracers can still call processors after provider shutdown.
   const sessionProvider = {
@@ -131,7 +133,11 @@ export async function useMicrosoftOpenTelemetry(
   globalThis.document?.addEventListener("visibilitychange", visibilityChange);
 
   async function flushProcessors(): Promise<void> {
-    const processors = [...(spanProcessors ?? []), ...(logRecordProcessors ?? [])];
+    const processors = [
+      ...(spanProcessors ?? []),
+      ...(logRecordProcessors ?? []),
+      ...defaultProcessors,
+    ];
     const results = await Promise.allSettled(
       processors.map((processor) => Promise.resolve().then(() => processor.forceFlush())),
     );
@@ -202,7 +208,20 @@ export async function useMicrosoftOpenTelemetry(
       ...(session ? [new SessionLogRecordProcessor(sessionProvider)] : []),
       ...(correlation ? [correlation] : []),
     ];
-    if ((traceOptions?.contextManager || traceOptions?.propagators) && isTracingRunning()) {
+    // Omitting a list keeps the upstream default OTLP export, which forceFlush also covers.
+    const exportSpanProcessors = spanProcessors ?? [
+      new BatchSpanProcessor(new OTLPTraceExporter()),
+    ];
+    const exportLogRecordProcessors = logRecordProcessors ?? [
+      new BatchLogRecordProcessor({ exporter: new OTLPLogExporter() }),
+    ];
+    if (!spanProcessors) defaultProcessors.push(...exportSpanProcessors);
+    if (!logRecordProcessors) defaultProcessors.push(...exportLogRecordProcessors);
+    if (
+      (traceOptions?.contextManager || traceOptions?.propagators) &&
+      spanProcessors?.length !== 0 &&
+      isTracingRunning()
+    ) {
       diag.warn("Trace context options are unused while another instance owns the page context");
     }
     instance = startTelemetryInstance({
@@ -212,24 +231,13 @@ export async function useMicrosoftOpenTelemetry(
         [ATTR_TELEMETRY_DISTRO_VERSION]: OPENTELEMETRY_BROWSER_VERSION,
         ...options.resource?.attributes,
       },
-      // An empty caller list turns the signal off. Otherwise enrichment runs first, and omitting
-      // the list keeps the upstream default OTLP export.
-      spanProcessors:
-        spanProcessors?.length === 0
-          ? []
-          : [
-              ...spanContextProcessors,
-              ...(spanProcessors ?? [new BatchSpanProcessor(new OTLPTraceExporter())]),
-            ],
-      logRecordProcessors:
-        logRecordProcessors?.length === 0
-          ? []
-          : [
-              ...logContextProcessors,
-              ...(logRecordProcessors ?? [
-                new BatchLogRecordProcessor({ exporter: new OTLPLogExporter() }),
-              ]),
-            ],
+      // An empty caller list turns the signal off. Otherwise enrichment runs first.
+      spanProcessors: exportSpanProcessors.length
+        ? [...spanContextProcessors, ...exportSpanProcessors]
+        : [],
+      logRecordProcessors: exportLogRecordProcessors.length
+        ? [...logContextProcessors, ...exportLogRecordProcessors]
+        : [],
       contextManager: correlation ?? traceOptions?.contextManager,
       propagators: traceOptions?.propagators,
     });

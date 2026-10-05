@@ -81,7 +81,9 @@ export function startTelemetryInstance(options: TelemetryInstanceOptions): Telem
         ],
       }),
     );
-    context.setGlobalContextManager((options.contextManager ?? new StackContextManager()).enable());
+    const contextManager = options.contextManager ?? new StackContextManager();
+    // A manager left registered by a shut-down instance stays; the API reports the conflict.
+    if (context.setGlobalContextManager(contextManager)) contextManager.enable();
   }
 
   const remove = addInstance({ tracerProvider, loggerProvider });

@@ -20,7 +20,7 @@ export interface InstancePipelines {
   readonly loggerProvider?: LoggerProvider;
 }
 
-// Running instances in initialization order; the first is the default route.
+// Running instances in initialization order; per signal, the first that collects it is the default.
 const running: InstancePipelines[] = [];
 const SELECTED_INSTANCE = createContextKey("@microsoft/opentelemetry-browser instance");
 
@@ -29,27 +29,39 @@ export const noopTracerProvider: TracerProvider = /* @__PURE__ */ new ProxyTrace
 /** Hands out no-op loggers. */
 export const noopLoggerProvider: LoggerProvider = { getLogger: () => createNoopLogger() };
 
-function selectInstance(): InstancePipelines | undefined {
+/**
+ * Resolves the provider for one signal: the selected instance's own provider, or by default the
+ * first running instance that collects the signal. A selected instance that does not collect it
+ * gets none, never another instance's.
+ */
+function selectProvider<K extends keyof InstancePipelines>(
+  signal: K,
+): InstancePipelines[K] | undefined {
   const selected = context.active().getValue(SELECTED_INSTANCE) as InstancePipelines | undefined;
-  const instance = selected ?? running[0];
-  if (instance && running.includes(instance)) return instance;
-  diag.warn("No running @microsoft/opentelemetry-browser instance; its telemetry is dropped");
+  const instance = selected
+    ? running.includes(selected)
+      ? selected
+      : undefined
+    : running.find((candidate) => candidate[signal]);
+  if (!instance) {
+    diag.warn("No running @microsoft/opentelemetry-browser instance; its telemetry is dropped");
+  }
+  return instance?.[signal];
 }
 
 /**
  * The global tracer provider. Resolves the owning instance once, when a tracer is acquired, and
  * returns that instance's own tracer, so later spans never depend on mutable routing state.
- * An instance that does not collect traces gets a no-op tracer, never another instance's.
  */
 const tracerRouter: TracerProvider = {
   getTracer: (name, version, options) =>
-    (selectInstance()?.tracerProvider ?? noopTracerProvider).getTracer(name, version, options),
+    (selectProvider("tracerProvider") ?? noopTracerProvider).getTracer(name, version, options),
 };
 
 /** The global logger provider, with the same binding rules as {@link tracerRouter}. */
 const loggerRouter: LoggerProvider = {
   getLogger: (name, version, options) =>
-    (selectInstance()?.loggerProvider ?? noopLoggerProvider).getLogger(name, version, options),
+    (selectProvider("loggerProvider") ?? noopLoggerProvider).getLogger(name, version, options),
 };
 
 /**

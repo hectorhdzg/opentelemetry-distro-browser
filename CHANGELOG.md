@@ -19,7 +19,7 @@ All notable changes to this package are documented in this file.
 
 - Isolate telemetry pipelines per initialization: each instance owns its tracer and logger
   providers, instrumentations bind to their own instance, and global tracers and loggers bind to
-  the earliest running instance when acquired.
+  the earliest running instance that collects that signal when acquired.
 - Suppress tracing of Azure Monitor export requests to prevent fetch instrumentation feedback loops.
 - Correlate page views, spans, and logs through shared operation IDs while preserving explicit
   application span contexts.

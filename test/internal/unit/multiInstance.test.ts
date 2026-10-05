@@ -156,17 +156,43 @@ it("routes new acquisitions to the next running instance without moving bound tr
   expect(await beta.exported()).toEqual({ spans: ["after"], logs: ["after"] });
 });
 
-it("never serves a signal an instance does not collect from another instance", async () => {
+it("defaults each signal to the first running instance that collects it", async () => {
   const logsOnly = await start({ spanProcessors: [] });
   const both = await start();
 
   logsOnly.probe.record("logs-only");
-  const span = trace.getTracer(SCOPE).startSpan("default");
+  trace.getTracer(SCOPE).startSpan("default").end();
+  logs.getLogger(SCOPE).emit({ eventName: "default" });
+
+  expect(await logsOnly.exported()).toEqual({ spans: [], logs: ["logs-only", "default"] });
+  expect(await both.exported()).toEqual({ spans: ["default"], logs: [] });
+});
+
+it("never serves a selected instance a signal it does not collect from another instance", async () => {
+  const logsOnly = await start({ spanProcessors: [] });
+  const both = await start();
+  const warn = vi.spyOn(diag, "warn").mockImplementation(() => {});
+
+  const span = withInstance(logsOnly.pipelines, () => trace.getTracer(SCOPE)).startSpan("selected");
   span.end();
 
   expect(span.isRecording()).toBe(false);
-  expect(await logsOnly.exported()).toEqual({ spans: [], logs: ["logs-only"] });
+  expect(warn).not.toHaveBeenCalled();
   expect(await both.exported()).toEqual({ spans: [], logs: [] });
+});
+
+it("drops and reports telemetry acquired for a shut-down selected instance", async () => {
+  const alpha = await start();
+  const beta = await start();
+  await alpha.handle.shutdown();
+  const warn = vi.spyOn(diag, "warn").mockImplementation(() => {});
+
+  const span = withInstance(alpha.pipelines, () => trace.getTracer(SCOPE)).startSpan("stale");
+  span.end();
+
+  expect(span.isRecording()).toBe(false);
+  expect(warn).toHaveBeenCalledOnce();
+  expect(await beta.exported()).toEqual({ spans: [], logs: [] });
 });
 
 it("drops and reports telemetry acquired when no instance is running", async () => {

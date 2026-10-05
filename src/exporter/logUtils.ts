@@ -126,85 +126,140 @@ function isLikelyAtFunctionName(prefix: string): boolean {
   return !/:\/\/|\\|^[./]|\/$/.test(prefix);
 }
 
-function parseStack(stack: string, maxSizeInBytes: number): readonly StackFrame[] | undefined {
-  const frames: StackFrame[] = [];
+function parseStackFrame(trimmed: string, level: number): StackFrame | undefined {
+  const locationWithColumn = /:(\d+):\d+\)?$/.exec(trimmed);
+  const location = locationWithColumn ?? /:(\d+)\)?$/.exec(trimmed);
+  if (!location) return undefined;
 
-  for (const assembly of stack.split("\n")) {
-    const trimmed = assembly.trim();
-    const locationWithColumn = /:(\d+):\d+\)?$/.exec(trimmed);
-    const location = locationWithColumn ?? /:(\d+)\)?$/.exec(trimmed);
-    if (!location) continue;
-
-    const prefix = trimmed.slice(0, location.index);
-    const openParenthesis = prefix.indexOf(" (");
-    const startsWithAt = trimmed.startsWith("at ");
-    const atSign = trimmed.indexOf("@");
-    const atPrefix = atSign >= 0 ? trimmed.slice(0, atSign) : "";
-    const atSource =
-      atSign >= 0 && atSign < location.index ? trimmed.slice(atSign + 1, location.index) : "";
-    const hasAtLocation =
-      !startsWithAt &&
-      atSign >= 0 &&
-      atSign < location.index &&
-      isLikelyAtFunctionName(atPrefix) &&
-      isLikelyCodeSource(atSource);
-    const bareSource = trimmed.slice(0, location.index);
-    const isBareSourceLocation =
-      !bareSource.includes(" ") && isLikelyCodeSource(bareSource.replace(/\)?$/, ""));
-    const hasParenthesizedLocation =
-      openParenthesis >= 0 && isLikelyCodeSource(prefix.slice(openParenthesis + 2));
-    if (!startsWithAt && !hasAtLocation && !isBareSourceLocation && !hasParenthesizedLocation) {
-      continue;
-    }
-
-    let method = "<no_method>";
-    let fileName = prefix.replace(/^\s*at\s+/, "").trim();
-    if (openParenthesis >= 0) {
-      method =
-        prefix
-          .slice(0, openParenthesis)
-          .replace(/^\s*at\s+/, "")
-          .trim() || method;
-      fileName = prefix.slice(openParenthesis + 2).trim();
-    } else if (hasAtLocation) {
-      method =
-        prefix
-          .slice(0, atSign)
-          .replace(/^\s*at\s+/, "")
-          .trim() || method;
-      fileName = prefix.slice(atSign + 1).trim();
-    } else if (startsWithAt) {
-      const separator = fileName.lastIndexOf(" ");
-      if (separator >= 0) {
-        method = fileName.slice(0, separator).trim() || method;
-        fileName = fileName.slice(separator + 1).trim();
-      }
-    }
-    if (!fileName) continue;
-    const line = Number(location[1]);
-    if (!Number.isSafeInteger(line)) continue;
-
-    frames.push({
-      level: frames.length,
-      method: truncateToLength(method, MAX_STACK_FRAME_FIELD_LENGTH),
-      assembly: truncateToLength(trimmed, MAX_STACK_FRAME_FIELD_LENGTH),
-      fileName: truncateToLength(fileName, MAX_STACK_FRAME_FIELD_LENGTH),
-      line,
-    });
+  const prefix = trimmed.slice(0, location.index);
+  const openParenthesis = prefix.indexOf(" (");
+  const startsWithAt = trimmed.startsWith("at ");
+  const atSign = trimmed.indexOf("@");
+  const atPrefix = atSign >= 0 ? trimmed.slice(0, atSign) : "";
+  const atSource =
+    atSign >= 0 && atSign < location.index ? trimmed.slice(atSign + 1, location.index) : "";
+  const hasAtLocation =
+    !startsWithAt &&
+    atSign >= 0 &&
+    atSign < location.index &&
+    isLikelyAtFunctionName(atPrefix) &&
+    isLikelyCodeSource(atSource);
+  const bareSource = trimmed.slice(0, location.index);
+  const isBareSourceLocation =
+    !bareSource.includes(" ") && isLikelyCodeSource(bareSource.replace(/\)?$/, ""));
+  const hasParenthesizedLocation =
+    openParenthesis >= 0 && isLikelyCodeSource(prefix.slice(openParenthesis + 2));
+  if (!startsWithAt && !hasAtLocation && !isBareSourceLocation && !hasParenthesizedLocation) {
+    return undefined;
   }
 
-  if (frames.length === 0) return undefined;
+  let method = "<no_method>";
+  let fileName = prefix.replace(/^\s*at\s+/, "").trim();
+  if (openParenthesis >= 0) {
+    method =
+      prefix
+        .slice(0, openParenthesis)
+        .replace(/^\s*at\s+/, "")
+        .trim() || method;
+    fileName = prefix.slice(openParenthesis + 2).trim();
+  } else if (hasAtLocation) {
+    method =
+      prefix
+        .slice(0, atSign)
+        .replace(/^\s*at\s+/, "")
+        .trim() || method;
+    fileName = prefix.slice(atSign + 1).trim();
+  } else if (startsWithAt) {
+    const separator = fileName.lastIndexOf(" ");
+    if (separator >= 0) {
+      method = fileName.slice(0, separator).trim() || method;
+      fileName = fileName.slice(separator + 1).trim();
+    }
+  }
+  if (!fileName) return undefined;
+  const line = Number(location[1]);
+  if (!Number.isSafeInteger(line)) return undefined;
 
-  const sizes = frames.map((frame) => getUtf8Size(JSON.stringify(frame)));
-  const serializedSize = 2 + sizes.reduce((sum, size) => sum + size, 0) + frames.length - 1;
-  if (serializedSize <= maxSizeInBytes) return frames;
+  return {
+    level,
+    method: truncateToLength(method, MAX_STACK_FRAME_FIELD_LENGTH),
+    assembly: truncateToLength(trimmed, MAX_STACK_FRAME_FIELD_LENGTH),
+    fileName: truncateToLength(fileName, MAX_STACK_FRAME_FIELD_LENGTH),
+    line,
+  };
+}
+
+/**
+ * Parses stack frames into at most `maxSizeInBytes` of JSON, keeping frames from both ends.
+ *
+ * Neither end of the capped result can contain more than `maxSizeInBytes` of frames, so only the
+ * longest head prefix and tail suffix within that budget are retained while streaming. Memory stays
+ * proportional to the budget rather than to the raw stack.
+ */
+function parseStack(stack: string, maxSizeInBytes: number): readonly StackFrame[] | undefined {
+  const head: StackFrame[] = [];
+  const headSizes: number[] = [];
+  let headSize = 2;
+  let headComplete = true;
+  let tail: StackFrame[] = [];
+  let tailSizes: number[] = [];
+  let tailStart = 0;
+  let tailSize = 2;
+  let frameCount = 0;
+
+  for (let start = 0; start <= stack.length;) {
+    const newline = stack.indexOf("\n", start);
+    const end = newline < 0 ? stack.length : newline;
+    const frame = parseStackFrame(stack.slice(start, end).trim(), frameCount);
+    start = end + 1;
+    if (!frame) continue;
+    frameCount++;
+
+    const size = getUtf8Size(JSON.stringify(frame));
+    if (headComplete && headSize + (head.length > 0 ? 1 : 0) + size <= maxSizeInBytes) {
+      headSize += (head.length > 0 ? 1 : 0) + size;
+      head.push(frame);
+      headSizes.push(size);
+    } else {
+      headComplete = false;
+    }
+
+    tailSize += (tail.length > tailStart ? 1 : 0) + size;
+    tail.push(frame);
+    tailSizes.push(size);
+    while (tailSize > maxSizeInBytes && tailStart < tail.length) {
+      tailSize -= tailSizes[tailStart] + (tail.length - tailStart > 1 ? 1 : 0);
+      tailStart++;
+    }
+    if (tailStart > 64 && tailStart * 2 > tail.length) {
+      tail = tail.slice(tailStart);
+      tailSizes = tailSizes.slice(tailStart);
+      tailStart = 0;
+    }
+  }
+
+  if (frameCount === 0) return undefined;
+  if (headComplete) return head;
+
+  // Merge the windows. Frames between them (or after the head, if no tail frame fits) were dropped,
+  // so the capping loop below must stop at that gap, exactly as it would on reaching a frame that
+  // cannot fit within the budget.
+  const frames = head.slice();
+  const sizes = headSizes.slice();
+  let gapIndex = head.length;
+  for (let index = tailStart; index < tail.length; index++) {
+    if (tail[index].level < head.length) continue;
+    if (frames.length === head.length && tail[index].level === head.length) gapIndex = -1;
+    frames.push(tail[index]);
+    sizes.push(tailSizes[index]);
+  }
 
   const first: StackFrame[] = [];
   const last: StackFrame[] = [];
   let selectedSize = 2;
   let left = 0;
   let right = frames.length - 1;
-  while (left <= right) {
+  while (left <= right && left !== gapIndex && right !== gapIndex - 1) {
     const isPair = left !== right;
     const addedSize =
       sizes[left] +

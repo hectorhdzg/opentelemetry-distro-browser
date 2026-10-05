@@ -200,11 +200,16 @@ function fitEnvelopeCustomFields(
   const measurements = sourceBaseData.measurements ? { ...sourceBaseData.measurements } : undefined;
   if (!properties && !measurements) return original;
 
+  // Remaining entry counts avoid re-enumerating keys after every removal.
+  const remaining = [
+    properties ? Object.keys(properties).length : 0,
+    measurements ? Object.keys(measurements).length : 0,
+  ];
   const createFittedEnvelope = (): AzureMonitorEnvelope => {
     const baseData: AzureMonitorBaseData = {
       ...sourceBaseData,
-      properties: properties && Object.keys(properties).length > 0 ? properties : undefined,
-      measurements: measurements && Object.keys(measurements).length > 0 ? measurements : undefined,
+      properties: remaining[0] > 0 ? properties : undefined,
+      measurements: remaining[1] > 0 ? measurements : undefined,
     };
     return {
       ...envelope,
@@ -212,18 +217,18 @@ function fitEnvelopeCustomFields(
     };
   };
   const customFields: Array<{ size: number; remove: () => boolean }> = [];
-  for (const fields of [properties, measurements]) {
-    if (!fields) continue;
+  [properties, measurements].forEach((fields, index) => {
+    if (!fields) return;
     for (const key of Object.keys(fields)) {
       customFields.push({
         size: encoder.encode(JSON.stringify([key, fields[key]])).byteLength,
         remove: () => {
           delete fields[key];
-          return Object.keys(fields).length === 0;
+          return --remaining[index] === 0;
         },
       });
     }
-  }
+  });
   customFields.sort((left, right) => right.size - left.size);
 
   // Re-serialize only when the estimate might fit. Removing a defined `"key":value` entry and its

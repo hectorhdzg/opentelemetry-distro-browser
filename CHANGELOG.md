@@ -27,6 +27,7 @@ All notable changes to this package are documented in this file.
 - Empty application `session.id` attributes are now replaced with the managed session ID.
 - Default OTLP span and log batch processors are created by the distribution so `forceFlush()`
   and page-hide flushing cover them.
+- Suppress tracing of Azure Monitor export requests to prevent fetch instrumentation feedback loops.
 - Correlate page views, spans, and logs through shared operation IDs while preserving explicit
   application span contexts.
 - Fixed post-merge performance publishing for fork contributions by using the upstream

@@ -3,6 +3,7 @@
 
 import { context, diag, propagation, trace } from "@opentelemetry/api";
 import { logs } from "@opentelemetry/api-logs";
+import { resourceFromAttributes } from "@opentelemetry/resources";
 import type { ReadWriteLogRecord } from "@opentelemetry/sdk-logs";
 import type { Span } from "@opentelemetry/sdk-trace-base";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -34,12 +35,13 @@ afterEach(async () => {
   else localStorage.setItem(storageKey, previousUser);
 });
 
-async function initialize(enabled = false) {
+async function initialize(enabled = false, resourceAttributes?: Record<string, string>) {
   const spans: Span[] = [];
   const records: ReadWriteLogRecord[] = [];
   const handle = await useMicrosoftOpenTelemetry({
     userContext: { enabled },
     pageView: { enabled: false },
+    ...(resourceAttributes && { resource: resourceFromAttributes(resourceAttributes) }),
     spanProcessors: [
       {
         onStart: (span) => spans.push(span),
@@ -297,6 +299,34 @@ it.each([
     expect(record.attributes).toEqual(expect.objectContaining(attributes));
     expect(record.attributes["user.id"]).not.toBe("managed-user");
     expect(record.attributes["user.account.id"]).not.toBe("managed-account");
+  }
+});
+
+it("preserves a resource enduser.pseudo.id instead of generating one", async () => {
+  const { emit } = await initialize(false, { "enduser.pseudo.id": "resource-anonymous" });
+
+  const { span, log } = emit();
+
+  for (const record of [span, log]) {
+    expect(record.attributes["enduser.pseudo.id"]).toBeUndefined();
+    expect(record.resource.attributes["enduser.pseudo.id"]).toBe("resource-anonymous");
+  }
+});
+
+it.each([
+  ["user.id", { "user.id": "resource-user" }],
+  ["enduser.id", { "enduser.id": "resource-user" }],
+  ["user.account.id", { "user.account.id": "resource-account" }],
+])("does not mix managed identity with resource %s", async (_name, resourceAttributes) => {
+  const { handle, emit } = await initialize(false, resourceAttributes);
+  handle.userContext.setAuthenticatedUserContext("managed-user", "managed-account");
+
+  const { span, log } = emit();
+
+  for (const record of [span, log]) {
+    expect(record.attributes["user.id"]).toBeUndefined();
+    expect(record.attributes["user.account.id"]).toBeUndefined();
+    expect(record.resource.attributes).toEqual(expect.objectContaining(resourceAttributes));
   }
 });
 

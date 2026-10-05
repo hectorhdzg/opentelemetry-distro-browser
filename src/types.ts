@@ -143,7 +143,8 @@ export interface MicrosoftOpenTelemetryBrowserOptions {
    * Opt-in user identity persistence.
    *
    * @remarks
-   * Every span and log receives an anonymous `enduser.pseudo.id`. It is generated in memory, or
+   * Spans and logs receive an anonymous `enduser.pseudo.id` unless the record or resource already
+   * has one. It is generated in memory, or
    * restored from storage when `enabled` is `true`. Set `enabled` to `true` only when anonymous and
    * authenticated identity may be persisted. The default implementation stores identity in
    * same-origin `localStorage` under one key shared by every handle in the origin, where it remains
@@ -204,8 +205,8 @@ export interface MicrosoftOpenTelemetryBrowserOptions {
  *
  * @remarks
  * Spans are enriched when they start and logs when they are emitted. Managed authenticated user
- * and account attributes are added only when the record has no application-supplied `user.id`,
- * `enduser.id`, or `user.account.id`; identity attributes set on a span after it starts are not
+ * and account attributes are added only when neither the record nor its resource supplies
+ * `user.id`, `enduser.id`, or `user.account.id`; identity attributes set on a span after it starts are not
  * reconciled. Controls remain usable after the lifecycle handle shuts down so applications can
  * still clear persisted identity.
  * @public

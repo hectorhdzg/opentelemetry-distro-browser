@@ -16,8 +16,11 @@ export interface BrowserContextProvider extends UserContextProvider {
   getSessionId(): string | null;
 }
 
+type AttributeBag = Readonly<Record<string, unknown>>;
+
 function enrich(
-  attributes: Readonly<Record<string, unknown>>,
+  attributes: AttributeBag,
+  resourceAttributes: AttributeBag,
   setAttribute: (name: string, value: string) => void,
   provider: BrowserContextProvider,
 ): void {
@@ -25,14 +28,17 @@ function enrich(
     const sessionId = provider.getSessionId();
     if (sessionId !== null) setAttribute("session.id", sessionId);
   }
-  if (!isNonEmptyString(attributes[ATTR_ENDUSER_PSEUDO_ID])) {
+  // Identity configured on the record or its resource belongs to the application.
+  const hasIdentity = (name: string): boolean =>
+    isNonEmptyString(attributes[name]) || isNonEmptyString(resourceAttributes[name]);
+  if (!hasIdentity(ATTR_ENDUSER_PSEUDO_ID)) {
     setAttribute(ATTR_ENDUSER_PSEUDO_ID, provider.getAnonymousUserId());
   }
   // Managed user and account form one identity; never mix them with application identity.
   if (
-    !isNonEmptyString(attributes[ATTR_USER_ID]) &&
-    !isNonEmptyString(attributes[ATTR_ENDUSER_ID]) &&
-    !isNonEmptyString(attributes[ATTR_USER_ACCOUNT_ID])
+    !hasIdentity(ATTR_USER_ID) &&
+    !hasIdentity(ATTR_ENDUSER_ID) &&
+    !hasIdentity(ATTR_USER_ACCOUNT_ID)
   ) {
     const userId = provider.getAuthenticatedUserId();
     if (userId !== undefined) setAttribute(ATTR_USER_ID, userId);
@@ -45,7 +51,12 @@ export class BrowserContextSpanProcessor implements SpanProcessor {
   public constructor(private readonly provider: BrowserContextProvider) {}
 
   public onStart(span: Span): void {
-    enrich(span.attributes, (name, value) => span.setAttribute(name, value), this.provider);
+    enrich(
+      span.attributes,
+      span.resource.attributes,
+      (name, value) => span.setAttribute(name, value),
+      this.provider,
+    );
   }
 
   public onEnd(): void {}
@@ -68,7 +79,12 @@ export class BrowserContextLogRecordProcessor implements LogRecordProcessor {
   }
 
   public onEmit(record: ReadWriteLogRecord): void {
-    enrich(record.attributes, (name, value) => record.setAttribute(name, value), this.provider);
+    enrich(
+      record.attributes,
+      record.resource.attributes,
+      (name, value) => record.setAttribute(name, value),
+      this.provider,
+    );
   }
 
   public forceFlush(): Promise<void> {

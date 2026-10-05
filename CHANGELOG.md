@@ -21,7 +21,9 @@ All notable changes to this package are documented in this file.
 
 - The prerelease browser lifecycle handle now includes the required `userContext` identity and
   persistence controls.
-- Every span and log now receives an anonymous `enduser.pseudo.id`. Azure Monitor envelopes map
+- Spans and logs without an application or resource `enduser.pseudo.id` now receive an anonymous
+  one. Managed authenticated identity is applied only when neither the record nor its resource
+  supplies `user.id`, `enduser.id`, or `user.account.id`. Azure Monitor envelopes map
   `enduser.pseudo.id`, `user.id`, `enduser.id`, and `user.account.id` to `ai.user.*` tags instead
   of custom dimensions.
 - Empty application `session.id` attributes are now replaced with the managed session ID.

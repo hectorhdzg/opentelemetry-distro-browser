@@ -2,11 +2,9 @@
 // Licensed under the MIT License.
 
 import {
-  context,
   diag,
   DiagConsoleLogger,
   DiagLogLevel,
-  propagation,
   type Attributes,
   type ContextManager,
   type TextMapPropagator,
@@ -22,12 +20,8 @@ import { defaultResource, resourceFromAttributes } from "@opentelemetry/resource
 import { LoggerProvider, type LogRecordProcessor } from "@opentelemetry/sdk-logs";
 import { TracerProvider, type SpanProcessor } from "@opentelemetry/sdk-trace";
 import { StackContextManager } from "@opentelemetry/sdk-trace-web";
-import {
-  addInstance,
-  isTracingRunning,
-  noopLoggerProvider,
-  noopTracerProvider,
-} from "./instanceRouter.js";
+import { addInstance, noopLoggerProvider, noopTracerProvider } from "./instanceRouter.js";
+import { addContextOwner, type PageCorrelation } from "./pageContext.js";
 
 /** Resolved pipeline configuration for one distribution instance. */
 export interface TelemetryInstanceOptions {
@@ -37,6 +31,8 @@ export interface TelemetryInstanceOptions {
   /** An empty list leaves logs off for this instance. */
   readonly logRecordProcessors: readonly LogRecordProcessor[];
   readonly contextManager?: ContextManager;
+  /** Page correlation applied to the page context while this instance owns it. */
+  readonly correlation?: PageCorrelation;
   readonly propagators?: readonly TextMapPropagator[];
 }
 
@@ -55,10 +51,14 @@ let diagLoggerSet = false;
  *
  * @remarks
  * Nothing is shared with other instances except the page-wide context manager and propagator,
- * which the OpenTelemetry API allows only one SDK to register. The first running instance that
- * collects traces registers them; while it runs, a later instance's context options are unused.
+ * which the OpenTelemetry API allows only one SDK to register: the first tracing instance on the
+ * page registers them for the page's lifetime. Page correlation comes from the earliest running
+ * tracing instance and passes on when it shuts down. If startup fails, the providers it created
+ * are shut down before the failure is rethrown.
  */
-export function startTelemetryInstance(options: TelemetryInstanceOptions): TelemetryInstance {
+export async function startTelemetryInstance(
+  options: TelemetryInstanceOptions,
+): Promise<TelemetryInstance> {
   // Matches the upstream browser SDK, which installs a console diagnostic logger once per page.
   if (!diagLoggerSet) {
     diagLoggerSet = true;
@@ -71,36 +71,50 @@ export function startTelemetryInstance(options: TelemetryInstanceOptions): Telem
   const loggerProvider = options.logRecordProcessors.length
     ? new LoggerProvider({ resource, processors: options.logRecordProcessors.slice() })
     : undefined;
-
-  if (tracerProvider && !isTracingRunning()) {
-    propagation.setGlobalPropagator(
-      new CompositePropagator({
-        propagators: options.propagators?.slice() ?? [
-          new W3CTraceContextPropagator(),
-          new W3CBaggagePropagator(),
-        ],
-      }),
+  const shutdownProviders = async (): Promise<void> => {
+    const results = await Promise.allSettled([
+      tracerProvider?.shutdown(),
+      loggerProvider?.shutdown(),
+    ]);
+    const errors = results.flatMap((result) =>
+      result.status === "rejected" ? [result.reason as unknown] : [],
     );
-    const contextManager = options.contextManager ?? new StackContextManager();
-    // A manager left registered by a shut-down instance stays; the API reports the conflict.
-    if (context.setGlobalContextManager(contextManager)) contextManager.enable();
+    if (errors.length === 1) throw errors[0];
+    if (errors.length > 1) throw new AggregateError(errors, "Telemetry provider shutdown failed");
+  };
+
+  let removeContextOwner: (() => void) | undefined;
+  try {
+    removeContextOwner =
+      tracerProvider &&
+      addContextOwner(
+        { correlation: options.correlation },
+        () => options.contextManager ?? new StackContextManager(),
+        () =>
+          new CompositePropagator({
+            propagators: options.propagators?.slice() ?? [
+              new W3CTraceContextPropagator(),
+              new W3CBaggagePropagator(),
+            ],
+          }),
+      );
+  } catch (error) {
+    try {
+      await shutdownProviders();
+    } catch (cleanupFailure) {
+      diag.error("Telemetry initialization cleanup failed", cleanupFailure);
+    }
+    throw error;
   }
 
-  const remove = addInstance({ tracerProvider, loggerProvider });
+  const removeInstance = addInstance({ tracerProvider, loggerProvider });
   return {
     tracerProvider: tracerProvider ?? noopTracerProvider,
     loggerProvider: loggerProvider ?? noopLoggerProvider,
     async shutdown() {
-      remove();
-      const results = await Promise.allSettled([
-        tracerProvider?.shutdown(),
-        loggerProvider?.shutdown(),
-      ]);
-      const errors = results.flatMap((result) =>
-        result.status === "rejected" ? [result.reason as unknown] : [],
-      );
-      if (errors.length === 1) throw errors[0];
-      if (errors.length > 1) throw new AggregateError(errors, "Telemetry provider shutdown failed");
+      removeInstance();
+      removeContextOwner?.();
+      await shutdownProviders();
     },
   };
 }

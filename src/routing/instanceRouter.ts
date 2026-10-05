@@ -94,14 +94,6 @@ export function addInstance(instance: InstancePipelines): () => void {
 }
 
 /**
- * Whether a running instance collects traces. That instance registered the page-wide context
- * manager and propagator, which the OpenTelemetry API does not allow a second SDK to replace.
- */
-export function isTracingRunning(): boolean {
-  return running.some((instance) => instance.tracerProvider);
-}
-
-/**
  * Routes tracers and loggers acquired inside `callback` to `instance` instead of the default.
  *
  * @internal Application-facing instance selection is follow-up work.

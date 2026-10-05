@@ -20,6 +20,7 @@ import {
   type MicrosoftOpenTelemetryBrowserOptions,
 } from "../../../src/index.js";
 import { addInstance, withInstance } from "../../../src/routing/instanceRouter.js";
+import { startTelemetryInstance } from "../../../src/routing/telemetryInstance.js";
 import { createInMemoryPipeline } from "../../fixtures/telemetry.js";
 
 vi.mock("../../../src/routing/instanceRouter.js", { spy: true });
@@ -76,6 +77,21 @@ async function start(options: MicrosoftOpenTelemetryBrowserOptions = {}) {
     handle,
     probe,
     pipelines,
+    async traceIds() {
+      await pipeline.forceFlush();
+      const ids = (items: { spanContext?: { traceId: string } }[]) =>
+        items.map((item) => item.spanContext?.traceId);
+      return {
+        spans: pipeline.spanExporter
+          .getFinishedSpans()
+          .map((span) => [span.name, span.spanContext().traceId]),
+        logs: pipeline.logExporter
+          .getFinishedLogRecords()
+          .filter((record) => record.eventName === "probe")
+          .map((record) => record.spanContext?.traceId),
+        ids,
+      };
+    },
     async exported() {
       await pipeline.forceFlush();
       return {
@@ -259,6 +275,80 @@ it("keeps the first instance's page context and reports unused context options",
   expect(first).toHaveBeenCalled();
   expect(second).not.toHaveBeenCalled();
   expect(warn).toHaveBeenCalledExactlyOnceWith(
-    "Trace context options are unused while another instance owns the page context",
+    "Trace context options are unused because an earlier instance registered the page context",
   );
+});
+
+it("hands page correlation to a surviving instance when the owner shuts down", async () => {
+  const alpha = await start({ pageView: {} });
+  const beta = await start({ pageView: {} });
+  alpha.probe.record("probe");
+  const alphaOperation = (await alpha.traceIds()).logs[0];
+  await alpha.handle.shutdown();
+  history.pushState(null, "", "/next");
+
+  beta.probe.record("probe");
+  const headers: Record<string, string> = {};
+  propagation.inject(context.active(), headers);
+
+  const { spans, logs } = await beta.traceIds();
+  const betaOperation = logs.at(-1);
+  expect(betaOperation).toBeDefined();
+  expect(betaOperation).not.toBe(alphaOperation);
+  expect(spans.at(-1)).toEqual(["probe", betaOperation]);
+  expect(headers.traceparent).toContain(betaOperation);
+});
+
+it("correlates a reinitialized instance with its own page operation", async () => {
+  const first = await start({ pageView: {} });
+  first.probe.record("probe");
+  const firstOperation = (await first.traceIds()).logs[0];
+  await first.handle.shutdown();
+
+  const second = await start({ pageView: {} });
+  second.probe.record("probe");
+  const headers: Record<string, string> = {};
+  propagation.inject(context.active(), headers);
+
+  const { spans, logs } = await second.traceIds();
+  expect(logs[0]).toBeDefined();
+  expect(logs[0]).not.toBe(firstOperation);
+  expect(spans).toEqual([["probe", logs[0]]]);
+  expect(headers.traceparent).toContain(logs[0]);
+});
+
+it("shuts down its providers and registers nothing when context startup fails", async () => {
+  const failure = new Error("enable failed");
+  const spanShutdown = vi.fn(async () => {});
+  const logShutdown = vi.fn(async () => {});
+  const register = vi.spyOn(context, "setGlobalContextManager");
+
+  await expect(
+    startTelemetryInstance({
+      resourceAttributes: {},
+      spanProcessors: [
+        { onStart() {}, onEnd() {}, forceFlush: async () => {}, shutdown: spanShutdown },
+      ],
+      logRecordProcessors: [{ onEmit() {}, forceFlush: async () => {}, shutdown: logShutdown }],
+      contextManager: {
+        active: () => ROOT_CONTEXT,
+        with: (_ctx, fn, thisArg, ...args) => fn.apply(thisArg, args),
+        bind: (_ctx, target) => target,
+        enable() {
+          throw failure;
+        },
+        disable() {
+          return this;
+        },
+      },
+    }),
+  ).rejects.toBe(failure);
+
+  expect(spanShutdown).toHaveBeenCalledOnce();
+  expect(logShutdown).toHaveBeenCalledOnce();
+  expect(register).not.toHaveBeenCalled();
+  expect(vi.mocked(addInstance)).not.toHaveBeenCalled();
+  const alpha = await start();
+  alpha.probe.record("alpha");
+  expect(await alpha.exported()).toEqual({ spans: ["alpha"], logs: ["alpha"] });
 });

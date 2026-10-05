@@ -72,7 +72,7 @@ it("prepends session enrichment without changing the caller's processor arrays",
   Object.freeze(options.spanProcessors);
   Object.freeze(options.logRecordProcessors);
   const upstreamHandle = fakeInstance();
-  vi.mocked(startTelemetryInstance).mockReturnValueOnce(upstreamHandle);
+  vi.mocked(startTelemetryInstance).mockResolvedValueOnce(upstreamHandle);
 
   const handle = await useMicrosoftOpenTelemetry(Object.freeze(options));
   handles.add(handle);
@@ -102,7 +102,7 @@ it("prepends session enrichment without changing the caller's processor arrays",
 it("adds Azure Monitor batch exporters after session enrichment and before caller processors", async () => {
   const pipeline = createInMemoryPipeline();
   const upstreamHandle = fakeInstance();
-  vi.mocked(startTelemetryInstance).mockReturnValueOnce(upstreamHandle);
+  vi.mocked(startTelemetryInstance).mockResolvedValueOnce(upstreamHandle);
   const addDocumentListener = vi.spyOn(document, "addEventListener");
 
   const handle = await useMicrosoftOpenTelemetry({
@@ -269,8 +269,8 @@ it("lets a service.name attribute replace the unknown_service placeholder", asyn
 
 it("does not share one attributes object across initializations", async () => {
   vi.mocked(startTelemetryInstance)
-    .mockReturnValueOnce(fakeInstance())
-    .mockReturnValueOnce(fakeInstance());
+    .mockResolvedValueOnce(fakeInstance())
+    .mockResolvedValueOnce(fakeInstance());
 
   await useMicrosoftOpenTelemetry();
   await useMicrosoftOpenTelemetry();
@@ -503,7 +503,7 @@ it("waits for an active manual flush before shutting down providers", async () =
     shutdown: vi.fn(async () => {}),
   };
   const upstreamHandle = fakeInstance();
-  vi.mocked(startTelemetryInstance).mockReturnValueOnce(upstreamHandle);
+  vi.mocked(startTelemetryInstance).mockResolvedValueOnce(upstreamHandle);
   const handle = await useMicrosoftOpenTelemetry({
     spanProcessors: [spanProcessor],
     pageView: { enabled: false },

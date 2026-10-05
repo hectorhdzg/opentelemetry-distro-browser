@@ -21,7 +21,7 @@ import {
   ATTR_TELEMETRY_DISTRO_VERSION,
 } from "@opentelemetry/semantic-conventions";
 import { OPENTELEMETRY_BROWSER_VERSION } from "./shared/constants.js";
-import { isTracingRunning } from "./routing/instanceRouter.js";
+import { isPageContextRegistered } from "./routing/pageContext.js";
 import { startTelemetryInstance, type TelemetryInstance } from "./routing/telemetryInstance.js";
 import type {
   MicrosoftOpenTelemetryBrowser,
@@ -97,7 +97,7 @@ export async function useMicrosoftOpenTelemetry(
   const owned = createOwnedInstrumentations(options);
   const pageView = owned[0];
   const correlation = pageView
-    ? new PageViewCorrelation(() => pageView.getOperationContext(), traceOptions?.contextManager)
+    ? new PageViewCorrelation(() => pageView.getOperationContext())
     : undefined;
   // Publish the initial page operation before caller instrumentations can emit.
   const instrumentations = [...owned, ...(options.instrumentations ?? [])];
@@ -220,11 +220,13 @@ export async function useMicrosoftOpenTelemetry(
     if (
       (traceOptions?.contextManager || traceOptions?.propagators) &&
       spanProcessors?.length !== 0 &&
-      isTracingRunning()
+      isPageContextRegistered()
     ) {
-      diag.warn("Trace context options are unused while another instance owns the page context");
+      diag.warn(
+        "Trace context options are unused because an earlier instance registered the page context",
+      );
     }
-    instance = startTelemetryInstance({
+    instance = await startTelemetryInstance({
       // Spread last: the caller's attributes win.
       resourceAttributes: {
         [ATTR_TELEMETRY_DISTRO_NAME]: "@microsoft/opentelemetry-browser",
@@ -238,7 +240,8 @@ export async function useMicrosoftOpenTelemetry(
       logRecordProcessors: exportLogRecordProcessors.length
         ? [...logContextProcessors, ...exportLogRecordProcessors]
         : [],
-      contextManager: correlation ?? traceOptions?.contextManager,
+      contextManager: traceOptions?.contextManager,
+      correlation,
       propagators: traceOptions?.propagators,
     });
 

@@ -97,9 +97,10 @@ export interface BrowserInstrumentation {
  * when there is no active span. Pass explicit context across asynchronous boundaries.
  *
  * The OpenTelemetry global context and propagation APIs are page-lifetime registrations that
- * `shutdown` does not unregister. Each initialization owns its own telemetry pipelines, but only
- * the first instance that collects traces registers context and propagation; options supplied to
- * later instances while it runs are unused.
+ * `shutdown` does not unregister. Each initialization owns its own telemetry pipelines, but the
+ * first instance on the page that collects traces registers context and propagation, so options
+ * supplied to later instances are unused. The page operation follows the earliest running
+ * instance with page views and passes to the next one when it shuts down.
  *
  * @public
  */

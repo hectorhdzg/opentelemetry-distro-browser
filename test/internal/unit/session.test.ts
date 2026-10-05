@@ -473,7 +473,7 @@ it("stops session timers on SDK startup failure", async () => {
 it("stops session timers even when instrumentation and SDK shutdown fail", async () => {
   const sdkFailure = new Error("SDK shutdown failed");
   const instrumentationFailure = new Error("disable failed");
-  vi.mocked(startTelemetryInstance).mockReturnValueOnce({
+  vi.mocked(startTelemetryInstance).mockResolvedValueOnce({
     tracerProvider: noopTracerProvider,
     loggerProvider: noopLoggerProvider,
     shutdown: vi.fn().mockRejectedValue(sdkFailure),

@@ -65,6 +65,8 @@ export function registerPageContext(
   createDefault: () => ContextManager,
   createPropagator: () => TextMapPropagator,
 ): void {
+  // Built before any registration, so a construction failure leaves nothing for a retry to skip.
+  const propagator = propagatorAttempted ? undefined : createPropagator();
   if (!storage) {
     const manager = (supplied ?? createDefault()).enable();
     storage = manager;
@@ -74,9 +76,9 @@ export function registerPageContext(
     }
   }
   // Registered independently, so an application context manager does not cost trace headers.
-  if (!propagatorAttempted) {
+  if (propagator) {
     propagatorAttempted = true;
-    propagation.setGlobalPropagator(createPropagator());
+    propagation.setGlobalPropagator(propagator);
   }
 }
 

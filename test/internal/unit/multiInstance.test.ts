@@ -8,6 +8,7 @@ import {
   propagation,
   ROOT_CONTEXT,
   trace,
+  type Context,
   type ContextManager,
   type TracerProvider,
 } from "@opentelemetry/api";
@@ -501,4 +502,37 @@ it("routes telemetry acquired while an instance flushes during shutdown to a sur
   logger.emit({ eventName: "survivor" });
 
   expect(await beta.exported()).toEqual({ spans: ["survivor"], logs: ["survivor"] });
+});
+
+it("registers context and propagation on retry after propagator construction fails", async () => {
+  const failure = new Error("fields failed");
+  const broken = {
+    fields(): string[] {
+      throw failure;
+    },
+    inject() {},
+    extract: (ctx: Context) => ctx,
+  };
+  await expect(start({ traces: { propagators: [broken] } })).rejects.toBe(failure);
+
+  const active = vi.fn(() => ROOT_CONTEXT);
+  await start({
+    traces: {
+      contextManager: {
+        active,
+        with: (_ctx, fn, thisArg, ...args) => fn.apply(thisArg, args),
+        bind: (_ctx, target) => target,
+        enable() {
+          return this;
+        },
+        disable() {
+          return this;
+        },
+      },
+    },
+  });
+  context.active();
+
+  expect(active).toHaveBeenCalled();
+  expect(propagation.fields()).toEqual(["traceparent", "tracestate", "baggage"]);
 });

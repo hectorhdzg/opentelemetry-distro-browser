@@ -100,7 +100,7 @@ it("prepends session enrichment without changing the caller's processor arrays",
   expect(upstreamHandle.shutdown).toHaveBeenCalledOnce();
 });
 
-it("adds Azure Monitor batch exporters after session enrichment and before caller processors", async () => {
+it("adds Azure Monitor batch exporters after context enrichment and before caller processors", async () => {
   const pipeline = createInMemoryPipeline();
   const upstreamHandle = fakeInstance();
   vi.mocked(startTelemetryInstance).mockResolvedValueOnce(upstreamHandle);
@@ -138,6 +138,26 @@ it("adds Azure Monitor batch exporters after session enrichment and before calle
 
   await handle.shutdown();
   expect(upstreamHandle.shutdown).toHaveBeenCalledOnce();
+});
+
+it("honors explicit per-signal disabling with Azure Monitor configured", async () => {
+  vi.mocked(startTelemetryInstance).mockResolvedValueOnce(fakeInstance());
+
+  const handle = await useMicrosoftOpenTelemetry({
+    azureMonitor: {
+      connectionString:
+        "InstrumentationKey=00000000-0000-0000-0000-000000000000;IngestionEndpoint=https://example.test",
+    },
+    spanProcessors: [],
+    logRecordProcessors: [],
+    pageView: { enabled: false },
+  });
+  handles.add(handle);
+
+  expect(startTelemetryInstance).toHaveBeenCalledOnce();
+  const sdkOptions = vi.mocked(startTelemetryInstance).mock.calls[0]?.[0];
+  expect(sdkOptions?.spanProcessors).toEqual([]);
+  expect(sdkOptions?.logRecordProcessors).toEqual([]);
 });
 
 it.each(["both", "context manager", "propagators", "no propagators"] as const)(
@@ -183,7 +203,10 @@ it.each(["both", "context manager", "propagators", "no propagators"] as const)(
         "telemetry.distro.name": "@microsoft/opentelemetry-browser",
         "telemetry.distro.version": OPENTELEMETRY_BROWSER_VERSION,
       },
-      spanProcessors: [pipeline.spanProcessor],
+      spanProcessors: [
+        expect.objectContaining({ onStart: expect.any(Function) }),
+        pipeline.spanProcessor,
+      ],
       logRecordProcessors: [],
       contextManager: withContextManager ? contextManager : undefined,
       propagators: configuration === "context manager" ? undefined : propagators,
@@ -273,8 +296,8 @@ it("does not share one attributes object across initializations", async () => {
     .mockResolvedValueOnce(fakeInstance())
     .mockResolvedValueOnce(fakeInstance());
 
-  await useMicrosoftOpenTelemetry();
-  await useMicrosoftOpenTelemetry();
+  handles.add(await useMicrosoftOpenTelemetry());
+  handles.add(await useMicrosoftOpenTelemetry());
 
   const [first, second] = vi.mocked(startTelemetryInstance).mock.calls;
   expect(first[0]?.resourceAttributes).not.toBe(second[0]?.resourceAttributes);
@@ -293,16 +316,44 @@ it("force flushes both signal processors", async () => {
   expect(logFlush).toHaveBeenCalledOnce();
 });
 
-it("force flushes the default OTLP export when no processors are supplied", async () => {
+it("owns and force flushes default OTLP processors without per-processor hide flushing", async () => {
+  const succeed = (_items: unknown, done: (result: { code: number }) => void) => done({ code: 0 });
+  const spanExport = vi.spyOn(OTLPTraceExporter.prototype, "export").mockImplementation(succeed);
+  const logExport = vi.spyOn(OTLPLogExporter.prototype, "export").mockImplementation(succeed);
   const spanFlush = vi.spyOn(BatchSpanProcessor.prototype, "forceFlush");
   const logFlush = vi.spyOn(BatchLogRecordProcessor.prototype, "forceFlush");
   const handle = await useMicrosoftOpenTelemetry({ pageView: { enabled: false } });
   handles.add(handle);
 
-  await handle.forceFlush();
+  const config = vi.mocked(startTelemetryInstance).mock.calls[0]?.[0];
+  expect(config?.spanProcessors).toEqual([
+    expect.objectContaining({ onStart: expect.any(Function) }),
+    expect.any(BatchSpanProcessor),
+  ]);
+  expect(config?.logRecordProcessors).toEqual([
+    expect.objectContaining({ onEmit: expect.any(Function) }),
+    expect.any(BatchLogRecordProcessor),
+  ]);
 
+  trace.getTracer("default-otlp").startSpan("operation").end();
+  logs.getLogger("default-otlp").emit({ body: "record" });
+  await handle.forceFlush();
+  expect(spanExport).toHaveBeenCalledOnce();
+  expect(logExport).toHaveBeenCalledOnce();
   expect(spanFlush).toHaveBeenCalledOnce();
   expect(logFlush).toHaveBeenCalledOnce();
+
+  globalThis.dispatchEvent(new Event("pagehide"));
+  await vi.waitFor(() => {
+    expect(spanFlush).toHaveBeenCalledTimes(2);
+    expect(logFlush).toHaveBeenCalledTimes(2);
+  });
+  await vi.waitFor(() => expect(isUnloading()).toBe(false));
+  // Upstream batch processors listen on document; non-bubbling events bypass the handle.
+  document.dispatchEvent(new Event("pagehide"));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(spanFlush).toHaveBeenCalledTimes(2);
+  expect(logFlush).toHaveBeenCalledTimes(2);
 });
 
 it("coalesces concurrent force flushes across both signals", async () => {
@@ -314,13 +365,11 @@ it("coalesces concurrent force flushes across both signals", async () => {
     onStart() {},
     onEnd() {},
     forceFlush: vi.fn(() => pendingFlush),
-    releasePageCorrelation: vi.fn(),
     shutdown: vi.fn(async () => {}),
   };
   const logProcessor = {
     onEmit() {},
     forceFlush: vi.fn(() => pendingFlush),
-    releasePageCorrelation: vi.fn(),
     shutdown: vi.fn(async () => {}),
   };
   const handle = await useMicrosoftOpenTelemetry({
@@ -350,7 +399,6 @@ it("starts an unload flush while a manual flush is pending", async () => {
       unloadStates.push(isUnloading());
       return new Promise<void>((resolve) => finishFlushes.push(resolve));
     }),
-    releasePageCorrelation: vi.fn(),
     shutdown: vi.fn(async () => {}),
   };
   const handle = await useMicrosoftOpenTelemetry({
@@ -380,7 +428,6 @@ it("turns synchronous force flush errors into rejections and permits retry", asy
       if (spanProcessor.forceFlush.mock.calls.length === 1) throw failure;
       return Promise.resolve();
     }),
-    releasePageCorrelation: vi.fn(),
     shutdown: vi.fn(async () => {}),
   };
   const handle = await useMicrosoftOpenTelemetry({
@@ -408,13 +455,11 @@ it("waits for every processor flush before reporting failures", async () => {
     forceFlush: vi.fn(() => {
       throw failure;
     }),
-    releasePageCorrelation: vi.fn(),
     shutdown: vi.fn(async () => {}),
   };
   const logProcessor = {
     onEmit() {},
     forceFlush: vi.fn(() => logFlush),
-    releasePageCorrelation: vi.fn(),
     shutdown: vi.fn(async () => {}),
   };
   const handle = await useMicrosoftOpenTelemetry({
@@ -443,7 +488,6 @@ it("clears unload state when a processor throws synchronously during flush", asy
       }
       return Promise.resolve();
     }),
-    releasePageCorrelation: vi.fn(),
     shutdown: vi.fn(async () => {}),
   };
   const handle = await useMicrosoftOpenTelemetry({
@@ -508,7 +552,6 @@ it("waits for an active manual flush before shutting down providers", async () =
     onStart() {},
     onEnd() {},
     forceFlush: vi.fn(() => pendingFlush),
-    releasePageCorrelation: vi.fn(),
     shutdown: vi.fn(async () => {}),
   };
   const upstreamHandle = fakeInstance();

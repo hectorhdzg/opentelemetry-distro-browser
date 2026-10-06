@@ -4,8 +4,12 @@
 import { context, diag, type SpanContext } from "@opentelemetry/api";
 import { OTLPLogExporter } from "@opentelemetry/exporter-logs-otlp-http";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
-import { SessionLogRecordProcessor, SessionSpanProcessor } from "./session/sessionProcessors.js";
+import {
+  BrowserContextLogRecordProcessor,
+  BrowserContextSpanProcessor,
+} from "./context/contextProcessors.js";
 import { createSession } from "./session/createSession.js";
+import { createUserContext } from "./user/createUserContext.js";
 import {
   BatchLogRecordProcessor,
   type BatchLogRecordProcessorBrowserOptions,
@@ -77,27 +81,42 @@ function createOwnedInstrumentations(
 export async function useMicrosoftOpenTelemetry(
   options: MicrosoftOpenTelemetryBrowserOptions = {},
 ): Promise<MicrosoftOpenTelemetryBrowser> {
-  const azureBatchOptions = {
+  const userContext = createUserContext(options.userContext?.enabled === true);
+  // The handle flushes owned processors on page hide; avoid a second per-processor hide flush.
+  const batchOptions = {
     disableAutoFlushOnDocumentHide: true,
   } satisfies Pick<BatchLogRecordProcessorBrowserOptions, "disableAutoFlushOnDocumentHide">;
-  const spanProcessors = options.azureMonitor
-    ? [
-        new BatchSpanProcessor(
-          new AzureMonitorSpanExporter(options.azureMonitor),
-          azureBatchOptions,
-        ),
-        ...(options.spanProcessors ?? []),
-      ]
-    : options.spanProcessors?.slice();
-  const logRecordProcessors = options.azureMonitor
-    ? [
-        new BatchLogRecordProcessor({
-          exporter: new AzureMonitorLogRecordExporter(options.azureMonitor),
-          ...azureBatchOptions,
-        }),
-        ...(options.logRecordProcessors ?? []),
-      ]
-    : options.logRecordProcessors?.slice();
+  const spanProcessors =
+    options.spanProcessors?.length === 0
+      ? []
+      : options.azureMonitor
+        ? [
+            new BatchSpanProcessor(
+              new AzureMonitorSpanExporter(options.azureMonitor),
+              batchOptions,
+            ),
+            ...(options.spanProcessors ?? []),
+          ]
+        : (options.spanProcessors?.slice() ?? [
+            new BatchSpanProcessor(new OTLPTraceExporter(), batchOptions),
+          ]);
+  const logRecordProcessors =
+    options.logRecordProcessors?.length === 0
+      ? []
+      : options.azureMonitor
+        ? [
+            new BatchLogRecordProcessor({
+              exporter: new AzureMonitorLogRecordExporter(options.azureMonitor),
+              ...batchOptions,
+            }),
+            ...(options.logRecordProcessors ?? []),
+          ]
+        : (options.logRecordProcessors?.slice() ?? [
+            new BatchLogRecordProcessor({
+              exporter: new OTLPLogExporter(),
+              ...batchOptions,
+            }),
+          ]);
   const session = options.session?.enabled === true ? createSession() : undefined;
   const traceOptions = options.traces;
   // While another instance supplies page correlation, page views adopt its operation.
@@ -109,13 +128,17 @@ export async function useMicrosoftOpenTelemetry(
   // Publish the initial page operation before caller instrumentations can emit.
   const instrumentations = [...owned, ...(options.instrumentations ?? [])];
   let instance: TelemetryInstance | undefined;
-  // Default OTLP export created when the caller supplies no processors for a signal.
-  const defaultProcessors: Array<{ forceFlush(): Promise<void> }> = [];
   let stopping = false;
   // Upstream stale tracers can still call processors after provider shutdown.
   const sessionProvider = {
     getSessionId: () => (stopping ? null : (session?.getSessionId() ?? null)),
   };
+  const contextProvider = {
+    ...userContext.provider,
+    ...sessionProvider,
+  };
+  const contextSpanProcessor = new BrowserContextSpanProcessor(contextProvider);
+  const contextLogRecordProcessor = new BrowserContextLogRecordProcessor(contextProvider);
 
   let shutdownPromise: Promise<void> | undefined;
   let flushPromise: Promise<void> | undefined;
@@ -140,11 +163,7 @@ export async function useMicrosoftOpenTelemetry(
   globalThis.document?.addEventListener("visibilitychange", visibilityChange);
 
   async function flushProcessors(): Promise<void> {
-    const processors = [
-      ...(spanProcessors ?? []),
-      ...(logRecordProcessors ?? []),
-      ...defaultProcessors,
-    ];
+    const processors = [...spanProcessors, ...logRecordProcessors];
     const results = await Promise.allSettled(
       processors.map((processor) => Promise.resolve().then(() => processor.forceFlush())),
     );
@@ -208,27 +227,13 @@ export async function useMicrosoftOpenTelemetry(
     })());
   }
 
-  const handle = { forceFlush, shutdown };
+  const handle = { forceFlush, shutdown, userContext: userContext.context };
 
   try {
     await session?.start();
-    const spanContextProcessors = session ? [new SessionSpanProcessor(sessionProvider)] : [];
-    const logContextProcessors = [
-      ...(session ? [new SessionLogRecordProcessor(sessionProvider)] : []),
-      ...(correlation ? [correlation] : []),
-    ];
-    // Omitting a list keeps the upstream default OTLP export, which forceFlush also covers.
-    const exportSpanProcessors = spanProcessors ?? [
-      new BatchSpanProcessor(new OTLPTraceExporter()),
-    ];
-    const exportLogRecordProcessors = logRecordProcessors ?? [
-      new BatchLogRecordProcessor({ exporter: new OTLPLogExporter() }),
-    ];
-    if (!spanProcessors) defaultProcessors.push(...exportSpanProcessors);
-    if (!logRecordProcessors) defaultProcessors.push(...exportLogRecordProcessors);
     if (
       (traceOptions?.contextManager || traceOptions?.propagators) &&
-      spanProcessors?.length !== 0 &&
+      spanProcessors.length !== 0 &&
       isPageContextRegistered()
     ) {
       diag.warn(
@@ -242,12 +247,10 @@ export async function useMicrosoftOpenTelemetry(
         [ATTR_TELEMETRY_DISTRO_VERSION]: OPENTELEMETRY_BROWSER_VERSION,
         ...options.resource?.attributes,
       },
-      // An empty caller list turns the signal off. Otherwise enrichment runs first.
-      spanProcessors: exportSpanProcessors.length
-        ? [...spanContextProcessors, ...exportSpanProcessors]
-        : [],
-      logRecordProcessors: exportLogRecordProcessors.length
-        ? [...logContextProcessors, ...exportLogRecordProcessors]
+      // An empty list turns the signal off. Otherwise enrichment runs first.
+      spanProcessors: spanProcessors.length ? [contextSpanProcessor, ...spanProcessors] : [],
+      logRecordProcessors: logRecordProcessors.length
+        ? [contextLogRecordProcessor, ...(correlation ? [correlation] : []), ...logRecordProcessors]
         : [],
       contextManager: traceOptions?.contextManager,
       correlation,

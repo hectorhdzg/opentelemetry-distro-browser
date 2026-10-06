@@ -38,12 +38,22 @@ import type {
   SeverityLevel,
   StackFrame,
 } from "./telemetryModels.js";
+import {
+  ATTR_ENDUSER_ID,
+  ATTR_ENDUSER_PSEUDO_ID,
+  ATTR_USER_ACCOUNT_ID,
+  ATTR_USER_ID,
+} from "../user/constants.js";
 
 const promotedLogAttributes = /* @__PURE__ */ new Set([
   EXCEPTION_MESSAGE,
   EXCEPTION_STACKTRACE,
   EXCEPTION_TYPE,
   NAVIGATION_DURATION,
+  ATTR_ENDUSER_ID,
+  ATTR_ENDUSER_PSEUDO_ID,
+  ATTR_USER_ACCOUNT_ID,
+  ATTR_USER_ID,
 ]);
 const promotedPageViewAttributes = /* @__PURE__ */ new Set([
   EXCEPTION_MESSAGE,
@@ -55,6 +65,10 @@ const promotedPageViewAttributes = /* @__PURE__ */ new Set([
   ATTR_PAGE_VIEW_NAME,
   ATTR_PAGE_VIEW_REFERRER,
   URL_FULL,
+  ATTR_ENDUSER_ID,
+  ATTR_ENDUSER_PSEUDO_ID,
+  ATTR_USER_ACCOUNT_ID,
+  ATTR_USER_ID,
 ]);
 // Azure Monitor ExceptionDetails schema limits (character lengths).
 const MAX_EXCEPTION_TYPE_LENGTH = 1024;
@@ -362,6 +376,8 @@ export function logToEnvelope(
     logRecord.spanContext?.traceId,
     logRecord.spanContext,
     logRecord.resource.attributes["service.name"],
+    logRecord.attributes as Attributes,
+    logRecord.resource.attributes,
   );
   const severityLevel = mapSeverity(logRecord.severityNumber);
   const time = hrTimeToDate(logRecord.hrTime);

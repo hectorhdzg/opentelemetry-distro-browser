@@ -40,8 +40,11 @@ export interface TelemetryInstanceOptions {
 export interface TelemetryInstance {
   readonly tracerProvider: TracerProviderApi;
   readonly loggerProvider: LoggerProviderApi;
-  /** Passes the page operation to the next instance at once, before shutdown awaits flushes. */
-  releasePageCorrelation(): void;
+  /**
+   * Stops routing new tracers and loggers to the instance and passes the page operation on at
+   * once, before shutdown awaits pending flushes.
+   */
+  detach(): void;
   /** Stops routing to the instance, then shuts down both of its providers. */
   shutdown(): Promise<void>;
 }
@@ -114,7 +117,10 @@ export async function startTelemetryInstance(
   return {
     tracerProvider: tracerProvider ?? noopTracerProvider,
     loggerProvider: loggerProvider ?? noopLoggerProvider,
-    releasePageCorrelation: () => removeCorrelation?.(),
+    detach() {
+      removeInstance();
+      removeCorrelation?.();
+    },
     async shutdown() {
       removeInstance();
       removeCorrelation?.();

@@ -39,7 +39,7 @@ function fakeInstance() {
   return {
     tracerProvider: noopTracerProvider,
     loggerProvider: noopLoggerProvider,
-    releasePageCorrelation: vi.fn(),
+    detach: vi.fn(),
     shutdown: vi.fn(async () => {}),
   };
 }

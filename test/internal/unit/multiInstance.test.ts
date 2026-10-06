@@ -480,3 +480,25 @@ it("keeps the page operation for other instances while the owner flushes during 
   expect(trace.getSpanContext(context.active())?.traceId).toBe(operation);
   await stopped;
 });
+
+it("routes telemetry acquired while an instance flushes during shutdown to a surviving instance", async () => {
+  let finishFlush!: () => void;
+  const flushing = new Promise<void>((resolve) => (finishFlush = resolve));
+  const alpha = await start({
+    spanProcessors: [
+      { onStart() {}, onEnd() {}, forceFlush: () => flushing, shutdown: async () => {} },
+    ],
+  });
+  const beta = await start();
+
+  void alpha.handle.forceFlush();
+  const stopped = alpha.handle.shutdown();
+  const tracer = trace.getTracer(SCOPE);
+  const logger = logs.getLogger(SCOPE);
+  finishFlush();
+  await stopped;
+  tracer.startSpan("survivor").end();
+  logger.emit({ eventName: "survivor" });
+
+  expect(await beta.exported()).toEqual({ spans: ["survivor"], logs: ["survivor"] });
+});

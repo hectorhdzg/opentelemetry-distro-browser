@@ -3,6 +3,7 @@
 
 import {
   context,
+  createContextKey,
   diag,
   propagation,
   ROOT_CONTEXT,
@@ -12,6 +13,7 @@ import {
 } from "@opentelemetry/api";
 import { createNoopLogger, logs, type LoggerProvider } from "@opentelemetry/api-logs";
 import { BasicTracerProvider } from "@opentelemetry/sdk-trace-base";
+import { StackContextManager } from "@opentelemetry/sdk-trace-web";
 import { afterEach, expect, it, vi } from "vitest";
 import {
   useMicrosoftOpenTelemetry,
@@ -432,4 +434,49 @@ it("registers propagation when the application already registered a context mana
   propagation.inject(trace.setSpanContext(ROOT_CONTEXT, spanContext), headers);
 
   expect(headers.traceparent).toBe(`00-${spanContext.traceId}-${spanContext.spanId}-01`);
+});
+
+it("leaves an application-registered context manager enabled when it is also supplied", async () => {
+  const manager = new StackContextManager();
+  context.setGlobalContextManager(manager.enable());
+  const disable = vi.spyOn(manager, "disable");
+  vi.spyOn(diag, "error").mockImplementation(() => {});
+  const key = createContextKey("app");
+
+  await start({ traces: { contextManager: manager } });
+
+  expect(disable).not.toHaveBeenCalled();
+  expect(context.with(ROOT_CONTEXT.setValue(key, 1), () => context.active().getValue(key))).toBe(1);
+});
+
+it("shares a logs-only instance's page operation with a later tracing instance", async () => {
+  const logsOnly = await start({ pageView: {}, spanProcessors: [] });
+  const tracing = await start({ pageView: {} });
+
+  logsOnly.probe.record("probe");
+  tracing.probe.record("probe");
+  window.dispatchEvent(new PageTransitionEvent("pagehide"));
+
+  const first = await logsOnly.traceIds();
+  const second = await tracing.traceIds();
+  const operation = first.pageViews.at(-1);
+  expect(operation).toBeDefined();
+  expect(first.logs).toEqual([operation]);
+  expect(second.pageViews.at(-1)).toBe(operation);
+  expect(second.logs).toEqual([operation]);
+  expect(second.spans).toEqual([["probe", operation]]);
+});
+
+it("keeps the page operation for other instances while the owner flushes during shutdown", async () => {
+  const alpha = await start({ pageView: {} });
+  const beta = await start({ pageView: {} });
+  beta.probe.record("probe");
+  const operation = (await beta.traceIds()).logs[0];
+
+  void alpha.handle.forceFlush();
+  const stopped = alpha.handle.shutdown();
+
+  expect(operation).toBeDefined();
+  expect(trace.getSpanContext(context.active())?.traceId).toBe(operation);
+  await stopped;
 });

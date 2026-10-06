@@ -39,6 +39,7 @@ function fakeInstance() {
   return {
     tracerProvider: noopTracerProvider,
     loggerProvider: noopLoggerProvider,
+    releasePageCorrelation: vi.fn(),
     shutdown: vi.fn(async () => {}),
   };
 }
@@ -313,11 +314,13 @@ it("coalesces concurrent force flushes across both signals", async () => {
     onStart() {},
     onEnd() {},
     forceFlush: vi.fn(() => pendingFlush),
+    releasePageCorrelation: vi.fn(),
     shutdown: vi.fn(async () => {}),
   };
   const logProcessor = {
     onEmit() {},
     forceFlush: vi.fn(() => pendingFlush),
+    releasePageCorrelation: vi.fn(),
     shutdown: vi.fn(async () => {}),
   };
   const handle = await useMicrosoftOpenTelemetry({
@@ -347,6 +350,7 @@ it("starts an unload flush while a manual flush is pending", async () => {
       unloadStates.push(isUnloading());
       return new Promise<void>((resolve) => finishFlushes.push(resolve));
     }),
+    releasePageCorrelation: vi.fn(),
     shutdown: vi.fn(async () => {}),
   };
   const handle = await useMicrosoftOpenTelemetry({
@@ -376,6 +380,7 @@ it("turns synchronous force flush errors into rejections and permits retry", asy
       if (spanProcessor.forceFlush.mock.calls.length === 1) throw failure;
       return Promise.resolve();
     }),
+    releasePageCorrelation: vi.fn(),
     shutdown: vi.fn(async () => {}),
   };
   const handle = await useMicrosoftOpenTelemetry({
@@ -403,11 +408,13 @@ it("waits for every processor flush before reporting failures", async () => {
     forceFlush: vi.fn(() => {
       throw failure;
     }),
+    releasePageCorrelation: vi.fn(),
     shutdown: vi.fn(async () => {}),
   };
   const logProcessor = {
     onEmit() {},
     forceFlush: vi.fn(() => logFlush),
+    releasePageCorrelation: vi.fn(),
     shutdown: vi.fn(async () => {}),
   };
   const handle = await useMicrosoftOpenTelemetry({
@@ -436,6 +443,7 @@ it("clears unload state when a processor throws synchronously during flush", asy
       }
       return Promise.resolve();
     }),
+    releasePageCorrelation: vi.fn(),
     shutdown: vi.fn(async () => {}),
   };
   const handle = await useMicrosoftOpenTelemetry({
@@ -500,6 +508,7 @@ it("waits for an active manual flush before shutting down providers", async () =
     onStart() {},
     onEnd() {},
     forceFlush: vi.fn(() => pendingFlush),
+    releasePageCorrelation: vi.fn(),
     shutdown: vi.fn(async () => {}),
   };
   const upstreamHandle = fakeInstance();

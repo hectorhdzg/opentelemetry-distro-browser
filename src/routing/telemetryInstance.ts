@@ -21,7 +21,7 @@ import { LoggerProvider, type LogRecordProcessor } from "@opentelemetry/sdk-logs
 import { TracerProvider, type SpanProcessor } from "@opentelemetry/sdk-trace";
 import { StackContextManager } from "@opentelemetry/sdk-trace-web";
 import { addInstance, noopLoggerProvider, noopTracerProvider } from "./instanceRouter.js";
-import { addContextOwner, type PageCorrelation } from "./pageContext.js";
+import { addPageCorrelation, registerPageContext, type PageCorrelation } from "./pageContext.js";
 
 /** Resolved pipeline configuration for one distribution instance. */
 export interface TelemetryInstanceOptions {
@@ -31,7 +31,7 @@ export interface TelemetryInstanceOptions {
   /** An empty list leaves logs off for this instance. */
   readonly logRecordProcessors: readonly LogRecordProcessor[];
   readonly contextManager?: ContextManager;
-  /** Page correlation applied to the page context while this instance owns it. */
+  /** Page correlation shared with other instances while this is the earliest with page views. */
   readonly correlation?: PageCorrelation;
   readonly propagators?: readonly TextMapPropagator[];
 }
@@ -40,6 +40,8 @@ export interface TelemetryInstanceOptions {
 export interface TelemetryInstance {
   readonly tracerProvider: TracerProviderApi;
   readonly loggerProvider: LoggerProviderApi;
+  /** Passes the page operation to the next instance at once, before shutdown awaits flushes. */
+  releasePageCorrelation(): void;
   /** Stops routing to the instance, then shuts down both of its providers. */
   shutdown(): Promise<void>;
 }
@@ -52,8 +54,8 @@ let diagLoggerSet = false;
  * @remarks
  * Nothing is shared with other instances except the page-wide context manager and propagator,
  * which the OpenTelemetry API allows only one SDK to register: the first tracing instance on the
- * page registers them for the page's lifetime. Page correlation comes from the earliest running
- * tracing instance and passes on when it shuts down. If startup fails, the providers it created
+ * page registers them for the page's lifetime. The page operation comes from the earliest running
+ * instance with page views, including logs-only instances, and passes on when it shuts down. If startup fails, the providers it created
  * are shut down before the failure is rethrown.
  */
 export async function startTelemetryInstance(
@@ -84,13 +86,11 @@ export async function startTelemetryInstance(
     if (errors.length > 1) throw new AggregateError(errors, "Telemetry provider shutdown failed");
   };
 
-  let removeContextOwner: (() => void) | undefined;
   try {
-    removeContextOwner =
-      tracerProvider &&
-      addContextOwner(
-        { correlation: options.correlation },
-        () => options.contextManager ?? new StackContextManager(),
+    if (tracerProvider) {
+      registerPageContext(
+        options.contextManager,
+        () => new StackContextManager(),
         () =>
           new CompositePropagator({
             propagators: options.propagators?.slice() ?? [
@@ -99,6 +99,7 @@ export async function startTelemetryInstance(
             ],
           }),
       );
+    }
   } catch (error) {
     try {
       await shutdownProviders();
@@ -108,13 +109,15 @@ export async function startTelemetryInstance(
     throw error;
   }
 
+  const removeCorrelation = options.correlation && addPageCorrelation(options.correlation);
   const removeInstance = addInstance({ tracerProvider, loggerProvider });
   return {
     tracerProvider: tracerProvider ?? noopTracerProvider,
     loggerProvider: loggerProvider ?? noopLoggerProvider,
+    releasePageCorrelation: () => removeCorrelation?.(),
     async shutdown() {
       removeInstance();
-      removeContextOwner?.();
+      removeCorrelation?.();
       await shutdownProviders();
     },
   };

@@ -171,6 +171,8 @@ export async function useMicrosoftOpenTelemetry(
   function shutdown(): Promise<void> {
     return (shutdownPromise ??= (async () => {
       stopping = true;
+      // Hand off first, so other instances keep the page operation while this one flushes.
+      instance?.releasePageCorrelation();
       void correlation?.shutdown();
       globalThis.removeEventListener?.("pagehide", flushForUnload);
       globalThis.document?.removeEventListener("visibilitychange", visibilityChange);

@@ -12,31 +12,24 @@ import {
 } from "@opentelemetry/api";
 import { withoutPageOperation } from "../instrumentation/pageView/pageViewCorrelation.js";
 
-/** Page correlation contributed by one tracing instance. */
+/** Page correlation contributed by one instance with page views. */
 export interface PageCorrelation {
   decorate(active: Context): Context;
   operation(): SpanContext | undefined;
 }
 
-interface ContextOwner {
-  readonly correlation?: PageCorrelation;
-}
-
-// Tracing instances in initialization order; the first with page views supplies correlation.
-const owners: ContextOwner[] = [];
+// Instances with page views in initialization order; the first supplies the page operation.
+const owners: PageCorrelation[] = [];
 let storage: ContextManager | undefined;
 // Attempted once per page; the API reports a conflicting registration.
 let propagatorAttempted = false;
 // Cached because active() is on the hot path; updated whenever owners change.
 let correlation: PageCorrelation | undefined;
-const updateCorrelation = () => {
-  correlation = owners.find((owner) => owner.correlation)?.correlation;
-};
 
 /**
  * The page-lifetime context manager. The OpenTelemetry API allows only one registration, so
  * context storage is shared for the page, while the page operation comes from the earliest
- * running tracing instance and passes on when that instance shuts down. Contexts bound before a
+ * running instance with page views and passes on when that instance shuts down. Contexts bound before a
  * handoff therefore stay valid.
  */
 const pageContextManager: ContextManager = {
@@ -60,23 +53,24 @@ const pageContextManager: ContextManager = {
 };
 
 /**
- * Adds a tracing instance as a page correlation owner. The first instance on the page also
- * registers its context manager and propagator, which then serve the page for its lifetime.
- * Never replaces registrations by another SDK; the API reports conflicts.
+ * Registers the page context manager and propagator for the first tracing instance, which then
+ * serve the page for its lifetime. Never replaces registrations by another SDK; the API reports
+ * conflicts.
  *
- * @returns Removes the owner, passing page correlation to the next tracing instance.
+ * @param supplied - Caller-owned manager. It may already be the global one, so a registration
+ * conflict leaves it enabled; only the default manager is disabled.
  */
-export function addContextOwner(
-  owner: ContextOwner,
-  createContextManager: () => ContextManager,
+export function registerPageContext(
+  supplied: ContextManager | undefined,
+  createDefault: () => ContextManager,
   createPropagator: () => TextMapPropagator,
-): () => void {
+): void {
   if (!storage) {
-    const manager = createContextManager().enable();
+    const manager = (supplied ?? createDefault()).enable();
     storage = manager;
     if (!context.setGlobalContextManager(pageContextManager)) {
       storage = undefined;
-      manager.disable();
+      if (!supplied) manager.disable();
     }
   }
   // Registered independently, so an application context manager does not cost trace headers.
@@ -84,12 +78,21 @@ export function addContextOwner(
     propagatorAttempted = true;
     propagation.setGlobalPropagator(createPropagator());
   }
+}
+
+/**
+ * Adds an instance's page correlation, whether or not it collects traces, so every instance with
+ * page views shares the page operation.
+ *
+ * @returns Removes the correlation, passing the page operation to the next instance.
+ */
+export function addPageCorrelation(owner: PageCorrelation): () => void {
   owners.push(owner);
-  updateCorrelation();
+  correlation = owners[0];
   return () => {
     const index = owners.indexOf(owner);
     if (index >= 0) owners.splice(index, 1);
-    updateCorrelation();
+    correlation = owners[0];
   };
 }
 

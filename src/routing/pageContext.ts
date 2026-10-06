@@ -7,6 +7,7 @@ import {
   ROOT_CONTEXT,
   type Context,
   type ContextManager,
+  type SpanContext,
   type TextMapPropagator,
 } from "@opentelemetry/api";
 import { withoutPageOperation } from "../instrumentation/pageView/pageViewCorrelation.js";
@@ -14,6 +15,7 @@ import { withoutPageOperation } from "../instrumentation/pageView/pageViewCorrel
 /** Page correlation contributed by one tracing instance. */
 export interface PageCorrelation {
   decorate(active: Context): Context;
+  operation(): SpanContext | undefined;
 }
 
 interface ContextOwner {
@@ -23,6 +25,8 @@ interface ContextOwner {
 // Tracing instances in initialization order; the first with page views supplies correlation.
 const owners: ContextOwner[] = [];
 let storage: ContextManager | undefined;
+// Attempted once per page; the API reports a conflicting registration.
+let propagatorAttempted = false;
 // Cached because active() is on the hot path; updated whenever owners change.
 let correlation: PageCorrelation | undefined;
 const updateCorrelation = () => {
@@ -50,6 +54,7 @@ const pageContextManager: ContextManager = {
   disable() {
     storage?.disable();
     storage = undefined;
+    propagatorAttempted = false;
     return this;
   },
 };
@@ -69,12 +74,15 @@ export function addContextOwner(
   if (!storage) {
     const manager = createContextManager().enable();
     storage = manager;
-    if (context.setGlobalContextManager(pageContextManager)) {
-      propagation.setGlobalPropagator(createPropagator());
-    } else {
+    if (!context.setGlobalContextManager(pageContextManager)) {
       storage = undefined;
       manager.disable();
     }
+  }
+  // Registered independently, so an application context manager does not cost trace headers.
+  if (!propagatorAttempted) {
+    propagatorAttempted = true;
+    propagation.setGlobalPropagator(createPropagator());
   }
   owners.push(owner);
   updateCorrelation();
@@ -83,6 +91,14 @@ export function addContextOwner(
     if (index >= 0) owners.splice(index, 1);
     updateCorrelation();
   };
+}
+
+/**
+ * The page operation supplied by another instance, which later instances adopt so their page
+ * views match the correlation on their spans and logs.
+ */
+export function getPageOperation(self: PageCorrelation | undefined): SpanContext | undefined {
+  return correlation === self ? undefined : correlation?.operation();
 }
 
 /** Whether a distribution instance has registered the page context and propagation. */

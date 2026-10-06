@@ -28,6 +28,11 @@ export class PageViewCorrelation implements LogRecordProcessor {
       : active;
   }
 
+  /** The current page operation, until shutdown. */
+  operation(): SpanContext | undefined {
+    return this.getOperation?.();
+  }
+
   // Correlation must not enable records rejected by the application's log processors.
   enabled(): boolean {
     return false;

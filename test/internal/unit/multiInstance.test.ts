@@ -89,6 +89,10 @@ async function start(options: MicrosoftOpenTelemetryBrowserOptions = {}) {
           .getFinishedLogRecords()
           .filter((record) => record.eventName === "probe")
           .map((record) => record.spanContext?.traceId),
+        pageViews: pipeline.logExporter
+          .getFinishedLogRecords()
+          .filter((record) => record.eventName !== "probe")
+          .map((record) => record.spanContext?.traceId),
         ids,
       };
     },
@@ -384,4 +388,48 @@ it("attempts registration once per provider registered by another SDK", async ()
   expect(registerTracer).toHaveBeenCalledOnce();
   expect(registerLogger).toHaveBeenCalledOnce();
   expect(warn).toHaveBeenCalledOnce();
+});
+
+it("keeps page-view and telemetry operation IDs consistent in each instance after navigation", async () => {
+  const alpha = await start({ pageView: {} });
+  const beta = await start({ pageView: {} });
+  history.pushState(null, "", "/consistent");
+
+  alpha.probe.record("probe");
+  beta.probe.record("probe");
+  window.dispatchEvent(new PageTransitionEvent("pagehide"));
+
+  for (const instance of [alpha, beta]) {
+    const { spans, logs, pageViews } = await instance.traceIds();
+    expect(pageViews.at(-1)).toBeDefined();
+    expect(logs).toEqual([pageViews.at(-1)]);
+    expect(spans).toEqual([["probe", pageViews.at(-1)]]);
+  }
+  history.replaceState(null, "", "/");
+});
+
+it("registers propagation when the application already registered a context manager", async () => {
+  context.setGlobalContextManager({
+    active: () => ROOT_CONTEXT,
+    with: (_ctx, fn, thisArg, ...args) => fn.apply(thisArg, args),
+    bind: (_ctx, target) => target,
+    enable() {
+      return this;
+    },
+    disable() {
+      return this;
+    },
+  });
+  vi.spyOn(diag, "error").mockImplementation(() => {});
+  const spanContext = {
+    traceId: "0af7651916cd43dd8448eb211c80319c",
+    spanId: "b7ad6b7169203331",
+    traceFlags: 1,
+  };
+
+  await start();
+  const headers: Record<string, string> = {};
+  propagation.inject(trace.setSpanContext(ROOT_CONTEXT, spanContext), headers);
+
+  expect(headers.traceparent).toBe(`00-${spanContext.traceId}-${spanContext.spanId}-01`);
 });

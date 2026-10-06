@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { context, diag } from "@opentelemetry/api";
+import { context, diag, type SpanContext } from "@opentelemetry/api";
 import { OTLPLogExporter } from "@opentelemetry/exporter-logs-otlp-http";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
 import { SessionLogRecordProcessor, SessionSpanProcessor } from "./session/sessionProcessors.js";
@@ -21,7 +21,7 @@ import {
   ATTR_TELEMETRY_DISTRO_VERSION,
 } from "@opentelemetry/semantic-conventions";
 import { OPENTELEMETRY_BROWSER_VERSION } from "./shared/constants.js";
-import { isPageContextRegistered } from "./routing/pageContext.js";
+import { getPageOperation, isPageContextRegistered } from "./routing/pageContext.js";
 import { startTelemetryInstance, type TelemetryInstance } from "./routing/telemetryInstance.js";
 import type {
   MicrosoftOpenTelemetryBrowser,
@@ -45,6 +45,7 @@ import type {
  */
 function createOwnedInstrumentations(
   options: MicrosoftOpenTelemetryBrowserOptions,
+  sharedOperation: () => SpanContext | undefined,
 ): PageViewInstrumentation[] {
   if (typeof document === "undefined" || typeof location === "undefined") return [];
 
@@ -53,7 +54,7 @@ function createOwnedInstrumentations(
   if (pageView.enabled !== false) {
     owned.push(
       new PageViewInstrumentation(
-        { ...pageView, enabled: false },
+        { ...pageView, enabled: false, sharedOperation },
         options.traces?.contextManager?.active() ?? context.active(),
       ),
     );
@@ -99,7 +100,8 @@ export async function useMicrosoftOpenTelemetry(
     : options.logRecordProcessors?.slice();
   const session = options.session?.enabled === true ? createSession() : undefined;
   const traceOptions = options.traces;
-  const owned = createOwnedInstrumentations(options);
+  // While another instance supplies page correlation, page views adopt its operation.
+  const owned = createOwnedInstrumentations(options, () => getPageOperation(correlation));
   const pageView = owned[0];
   const correlation = pageView
     ? new PageViewCorrelation(() => pageView.getOperationContext())

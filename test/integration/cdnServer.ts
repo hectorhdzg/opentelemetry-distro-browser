@@ -100,7 +100,14 @@ async function writeSnippetPage(
     .getTracer("cdn-snippet-test")
     .startSpan("cdn-snippet-span", { attributes: { "test.run_id": ${JSON.stringify(runId)} } })
     .end();
-  return handle.forceFlush();
+  // The page view ends in a macrotask after load, so flush only after that task has run.
+  return new Promise(function (resolve) {
+    function settle() { setTimeout(resolve, 0); }
+    if (document.readyState === "complete") settle();
+    else window.addEventListener("load", settle, { once: true });
+  }).then(function () {
+    return handle.forceFlush();
+  });
 }).then(function () {
   document.body.dataset.state = "ready";
 }, function (error) {

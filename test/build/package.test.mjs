@@ -204,7 +204,7 @@ test("the build produces ESM, CommonJS, UMD, and IIFE artifacts", async () => {
   ]);
 });
 
-test("browser bundles target the declared ES2022 browser matrix and have size budgets", async () => {
+test("browser bundles contain only ES2022 syntax and have size budgets", async () => {
   const files = (await readdir(new URL("dist/browser/", root)))
     .filter((file) => file.endsWith(".js"))
     .sort();

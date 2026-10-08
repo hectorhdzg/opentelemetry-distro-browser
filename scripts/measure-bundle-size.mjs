@@ -294,6 +294,8 @@ async function measureScenario(scenario) {
       label: scenario.label,
       group: scenario.group,
       entryPoint: scenario.entryPoint,
+      format: "rollup-esm-scenario",
+      target: "browser ES module",
       ...(scenario.baseline ? { baseline: scenario.baseline } : {}),
       ...sumChunks(chunks),
       chunks,
@@ -316,12 +318,15 @@ async function measureBrowserBundle(artifact) {
     throw error;
   }
   const fileName = artifact.slice(artifact.lastIndexOf("/") + 1);
+  const moduleFormat = /\.umd\.min\.js$/.test(fileName) ? "umd" : "iife";
   const chunks = [measureChunk(fileName, "entry", code)];
   return {
     id: `browser-${fileName.replace(/\.min\.js$/, "").replace(/\./g, "-")}`,
     label: `Browser bundle \`${fileName}\``,
     group: "browser-bundle",
     entryPoint: artifact,
+    format: `browser-${moduleFormat}-bundle`,
+    target: `browser classic script (${moduleFormat.toUpperCase()})`,
     ...sumChunks(chunks),
     chunks,
   };
@@ -480,7 +485,7 @@ export function createReport(measurements) {
     generatedAt: new Date().toISOString(),
     package: { name: packageName, version: packageJson.version },
     bundler: { name: "rollup", version: rollupVersion },
-    target: "browser ES module",
+    target: "browser; each scenario records its own format and target",
     compression: "gzip level 9 and Brotli quality 11, measured per emitted JavaScript chunk",
     budgetPolicy: getBudgetPolicy(packageJson.version),
     scenarios: addBudgetResults(addDeltas(measurements)),

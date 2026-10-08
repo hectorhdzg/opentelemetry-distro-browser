@@ -139,6 +139,10 @@ test("publishes immutable files without overwriting and uploads integrity files 
   assert.equal(option("--name"), uploads[0].blob);
   assert.equal(option("--content-type"), "text/javascript; charset=utf-8");
   assert.equal(option("--content-cache-control"), cacheControl);
+  assert.equal(
+    option("--content-md5"),
+    sha("md5", await readFile(resolve(cdnDirectory, uploads[0].file))),
+  );
   assert.equal(option("--overwrite"), "false");
   assert.equal(cacheControl, "public, max-age=31536000, immutable, no-transform");
 

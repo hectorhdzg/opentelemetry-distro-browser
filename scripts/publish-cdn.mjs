@@ -120,6 +120,8 @@ export async function publishCdn({
       upload.contentType,
       "--content-cache-control",
       upload.cacheControl,
+      "--content-md5",
+      md5,
       "--overwrite",
       "false",
       "--only-show-errors",

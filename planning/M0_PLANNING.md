@@ -44,7 +44,6 @@ beta release and the items below remain.
 | PR performance harness | Pull-request performance regression reporting and comparison (#38) |
 | Changelog check | CI changelog gate (#35) |
 | Test coverage | End-to-end page view and custom event (#32), context handling (#33), shared fixtures and PR coverage reports (#51) |
-| Module formats and browsers | CommonJS, UMD and IIFE artifacts, with unit and bundle suites in Chromium, Firefox and WebKit (#56) |
 | Release | First alpha published, package renamed (#31, #36); `0.1.0-alpha.2` prepared (#79) |
 | Public-release paperwork | `LICENSE`, `NOTICE.md`, `SECURITY.md`, `SUPPORT.md`, `PRIVACY.md`, `CODE_OF_CONDUCT.md`, `CONTRIBUTING.md` |
 

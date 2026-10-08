@@ -34,6 +34,30 @@ export const entryPointBudgets = {
   },
 };
 
+const sdkBrowserBundleBudget = {
+  rawBytes: 135 * 1024,
+  gzipBytes: 41 * 1024,
+  brotliBytes: 36 * 1024,
+};
+const instrumentationsBrowserBundleBudget = {
+  rawBytes: 63 * 1024,
+  gzipBytes: 19 * 1024,
+  brotliBytes: 17 * 1024,
+};
+
+/**
+ * Blocking budgets for the minified self-contained browser bundles emitted by `npm run build`,
+ * keyed by their path relative to the repository root.
+ */
+export const browserBundleBudgets = {
+  "dist/browser/opentelemetry-browser.iife.min.js": sdkBrowserBundleBudget,
+  "dist/browser/opentelemetry-browser.umd.min.js": sdkBrowserBundleBudget,
+  "dist/browser/opentelemetry-browser-instrumentations.iife.min.js":
+    instrumentationsBrowserBundleBudget,
+  "dist/browser/opentelemetry-browser-instrumentations.umd.min.js":
+    instrumentationsBrowserBundleBudget,
+};
+
 const API_IMPORTS = `
 import { context, diag, propagation, trace } from "@opentelemetry/api";
 import { logs } from "@opentelemetry/api-logs";
@@ -214,6 +238,22 @@ function validateScenarios() {
   }
 }
 
+const measureChunk = (fileName, type, code) => ({
+  fileName,
+  type,
+  rawBytes: Buffer.byteLength(code),
+  gzipBytes: gzipSync(code, { level: 9 }).byteLength,
+  brotliBytes: brotliCompressSync(code, {
+    params: { [zlibConstants.BROTLI_PARAM_QUALITY]: 11 },
+  }).byteLength,
+});
+
+const sumChunks = (chunks) => ({
+  rawBytes: chunks.reduce((total, chunk) => total + chunk.rawBytes, 0),
+  gzipBytes: chunks.reduce((total, chunk) => total + chunk.gzipBytes, 0),
+  brotliBytes: chunks.reduce((total, chunk) => total + chunk.brotliBytes, 0),
+});
+
 async function measureScenario(scenario) {
   const input = resolve(temporaryDirectory, `${scenario.id}.mjs`);
   await writeFile(input, scenario.code, "utf8");
@@ -240,18 +280,13 @@ async function measureScenario(scenario) {
     });
     const chunks = output
       .filter((item) => item.type === "chunk")
-      .map((chunk) => {
-        const rawBytes = Buffer.byteLength(chunk.code);
-        return {
-          fileName: chunk.fileName,
-          type: chunk.isEntry ? "entry" : chunk.isDynamicEntry ? "dynamic" : "shared",
-          rawBytes,
-          gzipBytes: gzipSync(chunk.code, { level: 9 }).byteLength,
-          brotliBytes: brotliCompressSync(chunk.code, {
-            params: { [zlibConstants.BROTLI_PARAM_QUALITY]: 11 },
-          }).byteLength,
-        };
-      })
+      .map((chunk) =>
+        measureChunk(
+          chunk.fileName,
+          chunk.isEntry ? "entry" : chunk.isDynamicEntry ? "dynamic" : "shared",
+          chunk.code,
+        ),
+      )
       .sort((left, right) => left.fileName.localeCompare(right.fileName));
 
     return {
@@ -260,14 +295,36 @@ async function measureScenario(scenario) {
       group: scenario.group,
       entryPoint: scenario.entryPoint,
       ...(scenario.baseline ? { baseline: scenario.baseline } : {}),
-      rawBytes: chunks.reduce((total, chunk) => total + chunk.rawBytes, 0),
-      gzipBytes: chunks.reduce((total, chunk) => total + chunk.gzipBytes, 0),
-      brotliBytes: chunks.reduce((total, chunk) => total + chunk.brotliBytes, 0),
+      ...sumChunks(chunks),
       chunks,
     };
   } finally {
     await bundle.close();
   }
+}
+
+async function measureBrowserBundle(artifact) {
+  let code;
+  try {
+    code = await readFile(resolve(root, artifact));
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      throw new Error(`Missing ${artifact}; run \`npm run build\` before \`npm run size\`.`, {
+        cause: error,
+      });
+    }
+    throw error;
+  }
+  const fileName = artifact.slice(artifact.lastIndexOf("/") + 1);
+  const chunks = [measureChunk(fileName, "entry", code)];
+  return {
+    id: `browser-${fileName.replace(/\.min\.js$/, "").replace(/\./g, "-")}`,
+    label: `Browser bundle \`${fileName}\``,
+    group: "browser-bundle",
+    entryPoint: artifact,
+    ...sumChunks(chunks),
+    chunks,
+  };
 }
 
 const formatKilobytes = (bytes) => `${(bytes / 1024).toFixed(2)} kB`;
@@ -281,10 +338,15 @@ export function getBudgetPolicy(version) {
   };
 }
 
-export function addBudgetResults(measurements, budgets = entryPointBudgets) {
+const budgetedGroups = new Set(["entry-point", "browser-bundle"]);
+
+export function addBudgetResults(
+  measurements,
+  budgets = { ...entryPointBudgets, ...browserBundleBudgets },
+) {
   return measurements.map((measurement) => {
     const budget = budgets[measurement.entryPoint];
-    if (measurement.group !== "entry-point" || !budget) return measurement;
+    if (!budgetedGroups.has(measurement.group) || !budget) return measurement;
     const exceededMetrics = ["rawBytes", "gzipBytes", "brotliBytes"].filter(
       (metric) => measurement[metric] > budget[metric],
     );
@@ -302,8 +364,12 @@ export function getBudgetViolations(report) {
 }
 
 export function enforceBundleSizeBudgets(report) {
-  const violations = getBudgetViolations(report);
-  if (report.budgetPolicy.mode === "blocking" && violations.length > 0) {
+  // Browser bundle budgets block in every release channel; npm entry-point budgets follow the
+  // release-channel policy.
+  const violations = getBudgetViolations(report).filter(
+    ({ group }) => group === "browser-bundle" || report.budgetPolicy.mode === "blocking",
+  );
+  if (violations.length > 0) {
     throw new Error(
       `Bundle size budgets exceeded: ${violations.map(({ entryPoint }) => entryPoint).join(", ")}`,
     );
@@ -343,9 +409,9 @@ function markdownTable(rows, includeBaseline = true) {
   return lines;
 }
 
-function budgetMarkdownTable(rows) {
+function budgetMarkdownTable(rows, heading = "Entry point") {
   const lines = [
-    "| Entry point | Minified | Budget | Gzip | Budget | Brotli | Budget | Result |",
+    `| ${heading} | Minified | Budget | Gzip | Budget | Brotli | Budget | Result |`,
     "|---|---:|---:|---:|---:|---:|---:|---|",
   ];
   for (const row of rows) {
@@ -389,6 +455,13 @@ export function createMarkdownReport(report) {
     "The metadata-only `./package.json` export is excluded because it is not executable browser",
     "JavaScript.",
     "",
+    "## Browser bundles",
+    "",
+    "Budget policy: **blocking**. The minified self-contained UMD and IIFE bundles emitted by",
+    "`npm run build` are measured as published, and exceeding any budget fails the size command.",
+    "",
+    ...budgetMarkdownTable(byGroup("browser-bundle"), "Artifact"),
+    "",
     "## Instrumentations",
     "",
     ...markdownTable(byGroup("instrumentation")),
@@ -424,6 +497,10 @@ export async function run() {
     for (const scenario of scenarios) {
       process.stderr.write(`Measuring ${scenario.id}\n`);
       measurements.push(await measureScenario(scenario));
+    }
+    for (const artifact of Object.keys(browserBundleBudgets)) {
+      process.stderr.write(`Measuring ${artifact}\n`);
+      measurements.push(await measureBrowserBundle(artifact));
     }
     const report = createReport(measurements);
     const markdown = createMarkdownReport(report);

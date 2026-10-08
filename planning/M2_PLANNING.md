@@ -3,13 +3,14 @@
 Provide a supported browser artifact and a copy/paste setup path for applications that do not use a
 bundler.
 
-Status: not started. M2 starts after the M1 browser behavior and support matrix are stable.
+Status: in progress. The browser bundle is complete; CDN publishing and the initialization snippet
+remain.
 
 ## Work items
 
 | Item | M2 outcome | Status |
 | --- | --- | --- |
-| Browser bundle | Build the production browser bundle from the supported distribution for the declared browser matrix and enforce minified, gzip and Brotli budgets. | Not started |
+| Browser bundle | Build the production browser bundle from the supported distribution for the declared browser matrix and enforce minified, gzip and Brotli budgets. | Done |
 | CDN publishing | Publish each release at an immutable versioned CDN URL and make the URL available with the release artifacts. Integrity, caching, CSP, cross-origin loading and load-failure checks are acceptance criteria for this deliverable. | Not started |
 | Initialization snippet | Generate a concise copy/paste asynchronous snippet that loads the versioned bundle, applies connection and consent configuration, starts the distribution, and reports initialization success and failure. | Not started |
 

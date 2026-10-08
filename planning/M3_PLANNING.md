@@ -11,7 +11,6 @@ Status: not started. M3 begins after the M2 CDN and snippet path is stable.
 - Advanced configuration and diagnostics parity.
 - Optional Web SDK extensions and framework integrations.
 - Advanced loader and delivery behavior.
-
 - Remaining Application Insights JavaScript feature gaps, listed below.
 
 The Azure Boards M3 items track the outcomes above. The following gaps have no Azure Boards item

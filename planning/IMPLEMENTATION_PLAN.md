@@ -18,6 +18,7 @@ This document holds the *why*. Everything else has its own document.
 | [`M1_PLANNING.md`](M1_PLANNING.md) | Customer-visible browser telemetry, reliability, privacy, multi-instance isolation and browser support |
 | [`M2_PLANNING.md`](M2_PLANNING.md) | Supported browser bundle, CDN publishing and initialization snippet |
 | [`M3_PLANNING.md`](M3_PLANNING.md) | Advanced configuration, optional integrations, and loader and delivery parity |
+| [`M4_PLANNING.md`](M4_PLANNING.md) | Remaining Application Insights JavaScript feature gaps not covered by M1 through M3 |
 | [`../poc/SIZE_REPORT.md`](../poc/SIZE_REPORT.md) | Generated bundle size measurements |
 
 ## 1. Goal
@@ -134,7 +135,7 @@ bundle tests.
 
 **Later.** Browser metrics remain deferred until upstream settles its browser metrics decision and
 aggregation, cardinality and export semantics. Advanced ApplicationInsights-JS parity is owned by
-[M3](M3_PLANNING.md).
+[M3](M3_PLANNING.md) and [M4](M4_PLANNING.md).
 
 **Non-goals.** Reimplementing the OTel API or SDK. Building an Application
 Insights SDK, or making a legacy AI API the primary surface. Coupling core
@@ -148,8 +149,9 @@ unavoidable global OTel constraints from users.
 Milestone-scoped decisions live in the milestone that owns them:
 [`M0_PLANNING.md`](M0_PLANNING.md),
 [`M1_PLANNING.md`](M1_PLANNING.md),
-[`M2_PLANNING.md`](M2_PLANNING.md) and
-[`M3_PLANNING.md`](M3_PLANNING.md). What remains here is owned by no single milestone.
+[`M2_PLANNING.md`](M2_PLANNING.md),
+[`M3_PLANNING.md`](M3_PLANNING.md) and
+[`M4_PLANNING.md`](M4_PLANNING.md). What remains here is owned by no single milestone.
 
 - **Whether property mangling is revisited, and on what threshold.** The current answer is no:
   readable source and safe property access outrank the bytes. It is reopened only against a measured

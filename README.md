@@ -101,6 +101,91 @@ await telemetry.forceFlush();
 await telemetry.shutdown();
 ```
 
+### Snippet setup
+
+If the application does not use npm or a bundler, load the distribution from the CDN by pasting
+this snippet into each page. Add it as the first script in the `<head>` section so that telemetry
+starts as early as possible, and replace `CHANNEL`, `VERSION`, `YOUR_CONNECTION_STRING`, and
+`YOUR_INTEGRITY` in the configuration object at its end:
+
+<!-- prettier-ignore -->
+```html
+<script>
+!(function(w,d,c){var s=d.createElement("script");w.microsoftOpenTelemetry=new Promise(function(resolve,reject){s.src=c.src;s.crossOrigin=c.crossOrigin;if(c.integrity)s.integrity=c.integrity;s.onload=function(){var sdk=w.Microsoft&&w.Microsoft.OpenTelemetry;if(!sdk||typeof sdk.useMicrosoftOpenTelemetry!=="function"){reject(new Error("OpenTelemetry browser bundle did not expose Microsoft.OpenTelemetry"));return}Promise.resolve().then(function(){return sdk.useMicrosoftOpenTelemetry({azureMonitor:{connectionString:c.connectionString}})}).then(resolve,reject)};s.onerror=function(){reject(new Error("OpenTelemetry browser bundle failed to load: "+c.src))};d.head.appendChild(s)})})(window,document,{"src":"https://js.monitor.azure.com/scripts/otel/CHANNEL/opentelemetry-browser.VERSION.min.js","connectionString":"YOUR_CONNECTION_STRING","crossOrigin":"anonymous","integrity":"YOUR_INTEGRITY"});
+</script>
+```
+
+For example, `0.1.0-alpha.3` loads
+`https://js.monitor.azure.com/scripts/otel/alpha/opentelemetry-browser.0.1.0-alpha.3.min.js`.
+`YOUR_INTEGRITY` is the `ext["@min.js"].integrity` value from the release's integrity file, such as
+[`opentelemetry-browser.0.1.0-alpha.3.integrity.json`](https://js.monitor.azure.com/scripts/otel/alpha/opentelemetry-browser.0.1.0-alpha.3.integrity.json).
+Remove the `integrity` entry to skip the Subresource Integrity check.
+
+The snippet can also be generated at build or render time. Without `src`, `getSdkLoaderScript()`
+loads the CDN bundle that matches the installed package version:
+
+```typescript
+import { getSdkLoaderScript } from "@microsoft/opentelemetry-browser/snippet";
+
+const script = getSdkLoaderScript({
+  connectionString: "InstrumentationKey=...;IngestionEndpoint=...",
+  integrity: "sha256-... sha384-... sha512-...",
+});
+```
+
+The snippet initializes Azure Monitor export with the default page-view collection. Use the npm
+package when you need other configuration options or the optional instrumentations.
+
+#### Reporting load and initialization failures
+
+The snippet exposes initialization as `window.microsoftOpenTelemetry`, a promise that resolves to the
+handle returned by `useMicrosoftOpenTelemetry()`. It rejects when the bundle fails to load, fails
+its integrity check, does not expose `Microsoft.OpenTelemetry`, or fails to initialize. Telemetry
+is disabled in that case, so report the failure through your own channel:
+
+```html
+<script>
+  window.microsoftOpenTelemetry
+    .then(function (telemetry) {
+      var tracer = Microsoft.OpenTelemetry.trace.getTracer("my-app", "1.0.0");
+      tracer.startSpan("app.ready").end();
+    })
+    .catch(function (error) {
+      console.error(error);
+    });
+</script>
+```
+
+After the promise resolves, the `Microsoft.OpenTelemetry` global also exposes the standard
+OpenTelemetry `trace` and `logs` APIs, and the handle provides `forceFlush()` and `shutdown()`.
+
+#### Snippet configuration options
+
+| Name               | Type                  | Description                                                                                                                               |
+| ------------------ | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `connectionString` | string **[required]** | Azure Monitor connection string passed to the distribution initializer.                                                                   |
+| `src`              | string _[optional]_   | URL of the IIFE bundle (`min.js` or `js`). Defaults to the package version's CDN bundle. You can use the public CDN or host it yourself. |
+| `integrity`        | string _[optional]_   | Subresource Integrity metadata applied to the injected script. When omitted, no integrity check is made.                                 |
+| `crossOrigin`      | string _[optional]_   | `crossorigin` value applied to the injected script. Defaults to `anonymous`, which integrity checks require for cross-origin scripts.    |
+
+Under a Content Security Policy, allow the snippet's hash or nonce and the CDN origin
+(`https://js.monitor.azure.com`) in `script-src`, and the Azure Monitor ingestion origin in
+`connect-src`.
+
+#### CDN endpoints
+
+Each release is published to an immutable, versioned location:
+
+```text
+https://js.monitor.azure.com/scripts/otel/<channel>/<module>.<version>.<format>
+```
+
+The channel is `b` for stable releases and the prerelease identifier (`alpha`, `beta`, or `rc`)
+otherwise. Both `opentelemetry-browser` and `opentelemetry-browser-instrumentations` are published
+as `min.js` and `js` (IIFE, used by the snippet) and `umd.min.js` and `umd.js` (UMD), each with a
+source map, together with `<module>.<version>.integrity.json`. See
+[Packaging](docs/packaging.md#cdn-and-loader-snippet) for details.
+
 ## Configuration
 
 ### `MicrosoftOpenTelemetryBrowserOptions`

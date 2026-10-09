@@ -65,7 +65,7 @@ export function getSdkLoaderScript(config: SdkLoaderConfig): string {
   if (typeof src !== "string" || src.trim() === "") {
     throw new TypeError("SdkLoaderConfig.src must be a non-empty string when provided.");
   }
-  if (typeof config.connectionString !== "string" || config.connectionString.trim() === "") {
+  if (typeof config?.connectionString !== "string" || config.connectionString.trim() === "") {
     throw new TypeError("SdkLoaderConfig.connectionString must be a non-empty string.");
   }
   if (

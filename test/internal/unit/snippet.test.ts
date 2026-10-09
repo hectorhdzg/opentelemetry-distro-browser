@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { afterEach, expect, it } from "vitest";
-import { getSdkLoaderScript } from "../../../src/snippet.js";
+import { getSdkLoaderScript, type SdkLoaderConfig } from "../../../src/snippet.js";
 import { OPENTELEMETRY_BROWSER_VERSION } from "../../../src/shared/constants.js";
 
 type LoaderWindow = typeof window & {
@@ -73,6 +73,9 @@ it("defaults to the versioned CDN bundle and validates explicit values", () => {
   expect(() =>
     getSdkLoaderScript({ src: null as unknown as string, connectionString: "connection" }),
   ).toThrow("SdkLoaderConfig.src must be a non-empty string when provided.");
+  expect(() => getSdkLoaderScript(null as unknown as SdkLoaderConfig)).toThrow(
+    "SdkLoaderConfig.connectionString must be a non-empty string.",
+  );
   expect(() =>
     getSdkLoaderScript({ src: "https://example.test/sdk.js", connectionString: "" }),
   ).toThrow("SdkLoaderConfig.connectionString must be a non-empty string.");

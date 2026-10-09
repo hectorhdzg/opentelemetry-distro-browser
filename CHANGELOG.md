@@ -2,6 +2,18 @@
 
 All notable changes to this package are documented in this file.
 
+## Unreleased
+
+### Added
+
+- Redact credentials and sensitive query-string and fragment parameters from page-view URLs and
+  referrers by default, with a configurable parameter-name replacement list.
+
+### Fixed
+
+- Invoke Azure Monitor export callbacks only once when they throw, without reporting callback
+  errors back to the same callback as export failures.
+
 ## 0.1.0-alpha.2 - 2026-10-08
 
 ### Added
@@ -23,6 +35,8 @@ All notable changes to this package are documented in this file.
   register with AMD loaders such as RequireJS.
 - Add Azure Monitor page-view performance telemetry
 - Add fixed-percentage sampling for browser telemetry
+- Enforce blocking minified, gzip, and Brotli budgets for the self-contained UMD and IIFE browser
+  bundles, and verify they contain only ES2022 syntax.
 
 ### Changed
 

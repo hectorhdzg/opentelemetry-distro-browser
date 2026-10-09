@@ -6,7 +6,7 @@ All notable changes to this package are documented in this file.
 
 ### Added
 
-- Document the CDN loader snippet setup, failure handling, options, and endpoints in the README.
+- Document CDN loader snippet setup and failure handling in the README.
 
 ### Fixed
 

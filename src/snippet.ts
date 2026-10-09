@@ -61,7 +61,7 @@ const inlineJson = (value: unknown): string =>
  * @public
  */
 export function getSdkLoaderScript(config: SdkLoaderConfig): string {
-  const src = config?.src ?? defaultSrc();
+  const src = config?.src === undefined ? defaultSrc() : config.src;
   if (typeof src !== "string" || src.trim() === "") {
     throw new TypeError("SdkLoaderConfig.src must be a non-empty string when provided.");
   }

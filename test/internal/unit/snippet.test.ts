@@ -71,6 +71,9 @@ it("defaults to the versioned CDN bundle and validates explicit values", () => {
     "SdkLoaderConfig.src must be a non-empty string when provided.",
   );
   expect(() =>
+    getSdkLoaderScript({ src: null as unknown as string, connectionString: "connection" }),
+  ).toThrow("SdkLoaderConfig.src must be a non-empty string when provided.");
+  expect(() =>
     getSdkLoaderScript({ src: "https://example.test/sdk.js", connectionString: "" }),
   ).toThrow("SdkLoaderConfig.connectionString must be a non-empty string.");
   expect(() =>

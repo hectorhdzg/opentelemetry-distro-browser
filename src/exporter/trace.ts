@@ -16,24 +16,24 @@ import { spanToEnvelope } from "./spanUtils.js";
  * @public
  */
 export class AzureMonitorSpanExporter implements SpanExporter {
-  private readonly client: AzureMonitorExportClient;
+  readonly #client: AzureMonitorExportClient;
 
   public constructor(options: AzureMonitorOptions) {
-    this.client = new AzureMonitorExportClient(options);
+    this.#client = new AzureMonitorExportClient(options);
   }
 
   public export(spans: ReadableSpan[], callback: (result: ExportResult) => void): void {
-    this.client.export(
-      spans.map((span) => spanToEnvelope(span, this.client.instrumentationKey)),
+    this.#client.export(
+      spans.map((span) => spanToEnvelope(span, this.#client.instrumentationKey)),
       callback,
     );
   }
 
   public forceFlush(): Promise<void> {
-    return this.client.forceFlush();
+    return this.#client.forceFlush();
   }
 
   public shutdown(): Promise<void> {
-    return this.client.shutdown();
+    return this.#client.shutdown();
   }
 }

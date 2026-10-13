@@ -15,6 +15,9 @@ All notable changes to this package are documented in this file.
 
 ### Changed
 
+- Remove the npm-only browser and user-agent resource detectors from the `opentelemetry-browser` CDN
+  and global bundles, saving 4.1 KiB minified (1.2 KiB gzip). The npm package is unchanged.
+
 - Include the browser runtime and upstream OpenTelemetry SDK version in the Azure Monitor
   `ai.internal.sdkVersion` tag.
 - Persist distribution-generated anonymous user IDs by default so Application Insights user

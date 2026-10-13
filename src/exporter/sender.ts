@@ -138,8 +138,14 @@ export class Sender {
         return result;
       }
 
-      permanentErrors.push(...getPermanentErrors(result));
-      const retryRequest = getRetryRequest(currentRequest, result);
+      const breezeErrors =
+        result.statusCode === 206 ? (parseBreezeResponse(result.result)?.errors ?? []) : [];
+      permanentErrors.push(
+        ...breezeErrors.filter(
+          (error) => !isRetriable(error.statusCode) && !isSamplingRejection(error),
+        ),
+      );
+      const retryRequest = getRetryRequest(currentRequest, result, breezeErrors);
       this.#rememberThrottleDeadline(result);
       if (!retryRequest || attempt >= MAX_SEND_ATTEMPTS) {
         return permanentErrors.length === 0 ? result : { ...result, permanentErrors };
@@ -344,7 +350,11 @@ function normalizeHostname(hostname: string): string {
   return hostname.toLowerCase().replace(/\.+$/, "");
 }
 
-function getRetryRequest(request: SendRequest, result: SenderResult): SendRequest | undefined {
+function getRetryRequest(
+  request: SendRequest,
+  result: SenderResult,
+  breezeErrors: readonly BreezeError[],
+): SendRequest | undefined {
   if (!isRetriable(result.statusCode)) {
     return undefined;
   }
@@ -355,12 +365,7 @@ function getRetryRequest(request: SendRequest, result: SenderResult): SendReques
     return undefined;
   }
 
-  const response = parseBreezeResponse(result.result);
-  if (!response) {
-    return undefined;
-  }
-
-  const envelopes = response.errors
+  const envelopes = breezeErrors
     .filter((error) => isRetriable(error.statusCode) && !isSamplingRejection(error))
     .map((error) => request.envelopes?.[error.index])
     .filter((envelope): envelope is AzureMonitorEnvelope => envelope !== undefined);
@@ -373,15 +378,6 @@ function getRetryRequest(request: SendRequest, result: SenderResult): SendReques
     body: new TextEncoder().encode(JSON.stringify(envelopes)),
     envelopes,
   };
-}
-
-function getPermanentErrors(result: SenderResult): BreezeError[] {
-  if (result.statusCode !== 206) return [];
-  const response = parseBreezeResponse(result.result);
-  if (!response) return [];
-  return response.errors.filter(
-    (error) => !isRetriable(error.statusCode) && !isSamplingRejection(error),
-  );
 }
 
 function getRetryDelay(retryAttempt: number, random: number): number {

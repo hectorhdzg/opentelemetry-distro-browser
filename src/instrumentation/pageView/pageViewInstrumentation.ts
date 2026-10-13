@@ -169,16 +169,10 @@ export class PageViewInstrumentation extends InstrumentationBase<InternalPageVie
   #historyLength = 0;
   #explicitName: string | undefined;
 
-  #onLoad: (() => void) | undefined;
-  #onPopState: (() => void) | undefined;
-  #onHashChange: (() => void) | undefined;
-  #onPageHide: (() => void) | undefined;
-  #onPageShow: ((event: Event) => void) | undefined;
-  #onCurrentEntryChange: ((event: Event) => void) | undefined;
+  /** Aborted by `disable()` to remove every listener added while enabled. */
+  #listeners: AbortController | undefined;
   #ownPushState: unknown;
   #ownReplaceState: unknown;
-  /** The target the `currententrychange` listener was attached to, so it can always be removed. */
-  #navigationApiTarget: NavigationApiLike | undefined;
 
   public constructor(
     config: InternalPageViewInstrumentationConfig = {},
@@ -293,15 +287,15 @@ export class PageViewInstrumentation extends InstrumentationBase<InternalPageVie
     this.#lastUrl = location.href;
     this.#historyLength = history.length;
 
+    const listeners = (this.#listeners = new AbortController());
+    const on = (target: EventTarget, type: string, listener: (event: Event) => void): void => {
+      target.addEventListener(type, listener, { signal: listeners.signal });
+    };
     const navigationApi = this.#getNavigationApi();
     if (navigationApi) {
-      this.#onCurrentEntryChange = (event: Event): void => {
+      on(navigationApi, "currententrychange", (event) => {
         this.#handleSoftNavigation("currententrychange", event);
-      };
-      // Remember the target: config is publicly replaceable through `setConfig`, so re-deriving
-      // it in `disable()` could return undefined and strand the listener.
-      this.#navigationApiTarget = navigationApi;
-      navigationApi.addEventListener("currententrychange", this.#onCurrentEntryChange);
+      });
     } else {
       if (!this.historyPatched) {
         this._wrap(history, "pushState", this.#patchHistoryMethod("pushState"));
@@ -312,32 +306,28 @@ export class PageViewInstrumentation extends InstrumentationBase<InternalPageVie
         this.#ownReplaceState = Reflect.get(history, "replaceState");
         this.historyPatched = true;
       }
-      this.#onPopState = (): void => {
+      on(window, "popstate", () => {
         this.#handleSoftNavigation("popstate");
-      };
-      window.addEventListener("popstate", this.#onPopState);
-      this.#onHashChange = (): void => {
+      });
+      on(window, "hashchange", () => {
         this.#handleSoftNavigation("hashchange");
-      };
-      window.addEventListener("hashchange", this.#onHashChange);
+      });
     }
 
     // A soft navigation that never settles would otherwise be lost when the user leaves.
-    this.#onPageHide = (): void => {
+    on(window, "pagehide", () => {
       this.settleForUnload();
-    };
-    window.addEventListener("pagehide", this.#onPageHide);
+    });
 
     // A restore from the back/forward cache reuses the document, so nothing else here fires: no
     // load event, no history entry change. Without this the user is looking at a page that
     // produced no page view, and every signal they generate is stamped with the correlation id of
     // the visit they made before they navigated away.
-    this.#onPageShow = (event: Event): void => {
+    on(window, "pageshow", (event) => {
       if ((event as PageTransitionEvent).persisted) {
         this.#handleBackForwardRestore();
       }
-    };
-    window.addEventListener("pageshow", this.#onPageShow);
+    });
 
     this.#startHardNavigation();
   }
@@ -349,34 +339,8 @@ export class PageViewInstrumentation extends InstrumentationBase<InternalPageVie
     this.enabledState = false;
     this.#operation = undefined;
 
-    if (this.#onLoad) {
-      window.removeEventListener("load", this.#onLoad);
-      this.#onLoad = undefined;
-    }
-    if (this.#onPopState) {
-      window.removeEventListener("popstate", this.#onPopState);
-      this.#onPopState = undefined;
-    }
-    if (this.#onHashChange) {
-      window.removeEventListener("hashchange", this.#onHashChange);
-      this.#onHashChange = undefined;
-    }
-    if (this.#onPageHide) {
-      window.removeEventListener("pagehide", this.#onPageHide);
-      this.#onPageHide = undefined;
-    }
-    if (this.#onPageShow) {
-      window.removeEventListener("pageshow", this.#onPageShow);
-      this.#onPageShow = undefined;
-    }
-    if (this.#onCurrentEntryChange) {
-      this.#navigationApiTarget?.removeEventListener(
-        "currententrychange",
-        this.#onCurrentEntryChange,
-      );
-      this.#onCurrentEntryChange = undefined;
-      this.#navigationApiTarget = undefined;
-    }
+    this.#listeners?.abort();
+    this.#listeners = undefined;
     if (this.historyPatched) {
       // Unwrap only while this instance is still the outermost wrapper. `history` is global: if
       // another instance wrapped after this one, unwrapping here restores the function this
@@ -429,13 +393,16 @@ export class PageViewInstrumentation extends InstrumentationBase<InternalPageVie
       }, documentNavigation);
       return;
     }
-    this.#onLoad = (): void => {
-      // `loadEventEnd` is populated only after the load event finishes dispatching.
-      this.#scheduleMacrotask(() => {
-        this.#finalizeHardNavigation(documentNavigation);
-      }, documentNavigation);
-    };
-    window.addEventListener("load", this.#onLoad, { once: true });
+    window.addEventListener(
+      "load",
+      () => {
+        // `loadEventEnd` is populated only after the load event finishes dispatching.
+        this.#scheduleMacrotask(() => {
+          this.#finalizeHardNavigation(documentNavigation);
+        }, documentNavigation);
+      },
+      { once: true, signal: this.#listeners?.signal },
+    );
   }
 
   /**
@@ -761,18 +728,10 @@ export class PageViewInstrumentation extends InstrumentationBase<InternalPageVie
    */
   #sanitize(url: string): string {
     const sanitize = this.getConfig().sanitizeUrl;
-    const result = safeExecuteInTheMiddle(
-      () => {
-        const redacted = redactUrl(url, this.getConfig().redactedQueryParams);
-        return sanitize ? sanitize(redacted) : redacted;
-      },
-      (error) => {
-        if (error) {
-          this._diag.error("URL sanitization failed; dropping the URL", error);
-        }
-      },
-      true,
-    );
+    const result = this.#guard(() => {
+      const redacted = redactUrl(url, this.getConfig().redactedQueryParams);
+      return sanitize ? sanitize(redacted) : redacted;
+    }, "URL sanitization failed; dropping the URL");
     return typeof result === "string" ? result : "";
   }
 
@@ -781,15 +740,7 @@ export class PageViewInstrumentation extends InstrumentationBase<InternalPageVie
     if (!generate) {
       return generatePageViewId();
     }
-    const result = safeExecuteInTheMiddle(
-      () => generate(),
-      (error) => {
-        if (error) {
-          this._diag.error("generatePageViewId hook failed", error);
-        }
-      },
-      true,
-    );
+    const result = this.#guard(generate, "generatePageViewId hook failed");
     if (typeof result === "string" && isValidTraceId(result)) return result;
     this._diag.error("generatePageViewId must return a valid trace id");
     return generatePageViewId();
@@ -806,15 +757,7 @@ export class PageViewInstrumentation extends InstrumentationBase<InternalPageVie
 
     const routeResolver = this.getConfig().routeResolver;
     if (routeResolver) {
-      const route = safeExecuteInTheMiddle(
-        () => routeResolver(),
-        (error) => {
-          if (error) {
-            this._diag.error("routeResolver hook failed", error);
-          }
-        },
-        true,
-      );
+      const route = this.#guard(routeResolver, "routeResolver hook failed");
       if (route) {
         return { name: route, source: NAME_SOURCE_ROUTE };
       }
@@ -948,29 +891,20 @@ export class PageViewInstrumentation extends InstrumentationBase<InternalPageVie
 
     const hook = this.getConfig().applyCustomLogRecordData;
     if (hook) {
-      safeExecuteInTheMiddle(
-        () => {
-          hook(logRecord);
-        },
-        (error) => {
-          if (error) {
-            this._diag.error("applyCustomLogRecordData hook failed", error);
-          }
-        },
-        true,
-      );
+      this.#guard(() => hook(logRecord), "applyCustomLogRecordData hook failed");
     }
 
     // The log pipeline is application-supplied and reached synchronously from the app's own
     // `history.pushState`, so a throwing processor or exporter must not break navigation.
-    safeExecuteInTheMiddle(
-      () => {
-        this.logger.emit(logRecord);
-      },
+    this.#guard(() => this.logger.emit(logRecord), "failed to emit a page-view record");
+  }
+
+  /** Runs application-supplied code, logging rather than propagating a failure. */
+  #guard<T>(callback: () => T, message: string): T | undefined {
+    return safeExecuteInTheMiddle(
+      callback,
       (error) => {
-        if (error) {
-          this._diag.error("failed to emit a page-view record", error);
-        }
+        if (error) this._diag.error(message, error);
       },
       true,
     );

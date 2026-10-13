@@ -278,9 +278,7 @@ export async function useMicrosoftOpenTelemetry(
       spanProcessors.length !== 0 &&
       isPageContextRegistered()
     ) {
-      diag.warn(
-        "Trace context options are unused because an earlier instance registered the page context",
-      );
+      diag.warn("Trace context options ignored; page context already registered");
     }
     const instanceOptions = {
       // Spread last: the caller's attributes win.

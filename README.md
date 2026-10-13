@@ -227,6 +227,9 @@ await useMicrosoftOpenTelemetry({
 });
 ```
 
+The detectors are available from the npm package only. The CDN bundles and the loader snippet do
+not include them, so pages that load the SDK from the CDN do not download code they cannot use.
+
 ## Bundle size
 
 The size depends on how the package is loaded. Sizes in KiB, measured from the current source:
@@ -234,7 +237,7 @@ The size depends on how the package is loaded. Sizes in KiB, measured from the c
 | Loaded from | Includes                                          | Minified |  gzip | Brotli |
 | ----------- | ------------------------------------------------- | -------: | ----: | -----: |
 | npm         | Distribution, page views and Azure Monitor export |    131.6 |  40.3 |   35.3 |
-| CDN         | Everything, including all nine instrumentations   |    176.9 |  53.0 |   46.1 |
+| CDN         | Everything except the npm-only resource detectors |    172.8 |  51.8 |   45.0 |
 
 **npm.** The application's bundler removes code the application does not use. Instrumentations are
 loaded through dynamic imports only when enabled, so each one adds only its own code. Gzip added
@@ -251,7 +254,8 @@ by each instrumentation, measured on its own:
 **CDN.** A page that loads a script file cannot remove unused code, and the file cannot know which
 features the page will enable, so `opentelemetry-browser.<version>.min.js` includes every
 instrumentation. The loader snippet enables `fetch` and `xhr`; the others are included but stay off
-unless enabled.
+unless enabled. The browser and user-agent resource detectors are npm-only; see
+[Browser resource attributes](#browser-resource-attributes).
 
 Run `npm run build && npm run size` to reproduce these measurements.
 

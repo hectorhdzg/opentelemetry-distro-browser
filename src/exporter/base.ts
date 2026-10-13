@@ -44,9 +44,7 @@ export class AzureMonitorExportClient {
       options.connectionString,
     );
     if (!instrumentationKey || !isValidInstrumentationKey(instrumentationKey)) {
-      throw new Error(
-        "The Azure Monitor connection string must contain a valid InstrumentationKey UUID.",
-      );
+      throw new Error("Connection string needs a valid InstrumentationKey UUID.");
     }
     this.instrumentationKey = instrumentationKey;
     this.#sender = new Sender({
@@ -107,7 +105,7 @@ export class AzureMonitorExportClient {
         return {
           code: ExportResultCode.FAILED,
           error: new Error(
-            `Unload payload exceeded the aggregate beacon limit; delivered ${envelopes.length - batchResult.droppedEnvelopeCount} of ${envelopes.length} envelopes.`,
+            `Unload beacon limit exceeded; sent ${envelopes.length - batchResult.droppedEnvelopeCount} of ${envelopes.length} envelopes.`,
           ),
         };
       })
@@ -345,7 +343,7 @@ function toSingleExportResult(result: SenderResultType): ExportResult {
     return {
       code: ExportResultCode.FAILED,
       error: new Error(
-        `Azure Monitor ingestion permanently rejected ${result.permanentErrors.length} item(s).`,
+        `Azure Monitor permanently rejected ${result.permanentErrors.length} item(s).`,
       ),
     };
   }
@@ -360,6 +358,6 @@ function toSingleExportResult(result: SenderResultType): ExportResult {
   }
   return {
     code: ExportResultCode.FAILED,
-    error: new Error(`Azure Monitor ingestion failed with HTTP status ${result.statusCode}.`),
+    error: new Error(`Azure Monitor export failed with HTTP ${result.statusCode}.`),
   };
 }

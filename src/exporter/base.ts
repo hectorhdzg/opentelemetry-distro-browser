@@ -35,9 +35,9 @@ export interface AzureMonitorOptions {
 }
 
 export class AzureMonitorExportClient {
-  private readonly sender: Sender;
-  private readonly pending = new Set<Promise<void>>();
-  private stopped = false;
+  readonly #sender: Sender;
+  readonly #pending = new Set<Promise<void>>();
+  #stopped = false;
 
   public constructor(options: AzureMonitorOptions) {
     const { instrumentationKey, ingestionEndpoint } = parseConnectionString(
@@ -49,7 +49,7 @@ export class AzureMonitorExportClient {
       );
     }
     this.instrumentationKey = instrumentationKey;
-    this.sender = new Sender({
+    this.#sender = new Sender({
       endpoint: `${ingestionEndpoint}/v2/track`,
       disableBeacon: options.disableBeacon,
     });
@@ -61,7 +61,7 @@ export class AzureMonitorExportClient {
     envelopes: readonly AzureMonitorEnvelope[],
     callback: (result: ExportResult) => void,
   ): void {
-    if (this.stopped) {
+    if (this.#stopped) {
       callback({ code: ExportResultCode.FAILED, error: new Error("Exporter has been shut down.") });
       return;
     }
@@ -83,7 +83,7 @@ export class AzureMonitorExportClient {
     }
     const operation = Promise.allSettled(
       batchResult.requests.map(({ body, envelopes: batchEnvelopes }) =>
-        this.sender.send({
+        this.#sender.send({
           body,
           contentType: CONTENT_TYPE,
           envelopes: batchEnvelopes,
@@ -117,17 +117,17 @@ export class AzureMonitorExportClient {
       }))
       // Callback errors must not be reported back to the same callback as export failures.
       .then(callback)
-      .finally(() => this.pending.delete(operation));
-    this.pending.add(operation);
+      .finally(() => this.#pending.delete(operation));
+    this.#pending.add(operation);
   }
 
   public async forceFlush(): Promise<void> {
-    await Promise.all([...this.pending]);
+    await Promise.all([...this.#pending]);
   }
 
   public async shutdown(): Promise<void> {
-    if (this.stopped) return;
-    this.stopped = true;
+    if (this.#stopped) return;
+    this.#stopped = true;
     await this.forceFlush();
   }
 }

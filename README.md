@@ -180,7 +180,9 @@ compatible upstream instrumentation instances yourself and pass them directly.
 
 ### OTLP and custom exporters
 
-Use standard OpenTelemetry processors to export to OTLP or another backend. For OTLP/HTTP:
+The distribution exports to Azure Monitor when `azureMonitor` is set. It does not bundle an OTLP
+exporter: without `azureMonitor`, `spanProcessors` or `logRecordProcessors`, no telemetry is
+exported. Use standard OpenTelemetry processors to export to OTLP or another backend. For OTLP/HTTP:
 
 ```typescript
 import { OTLPLogExporter } from "@opentelemetry/exporter-logs-otlp-http";
@@ -236,8 +238,8 @@ The size depends on how the package is loaded. Sizes in KiB, measured from the c
 
 | Loaded from | Includes                                          | Minified |  gzip | Brotli |
 | ----------- | ------------------------------------------------- | -------: | ----: | -----: |
-| npm         | Distribution, page views and Azure Monitor export |    131.6 |  40.3 |   35.3 |
-| CDN         | Everything except the npm-only resource detectors |    172.8 |  51.8 |   45.0 |
+| npm         | Distribution, page views and Azure Monitor export |    117.4 |  36.0 |   31.7 |
+| CDN         | Everything except the npm-only resource detectors |    158.5 |  47.6 |   41.4 |
 
 **npm.** The application's bundler removes code the application does not use. Instrumentations are
 loaded through dynamic imports only when enabled, so each one adds only its own code. Gzip added

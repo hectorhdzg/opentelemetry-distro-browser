@@ -234,36 +234,93 @@ function parseStackFrame(trimmed: string, level: number): StackFrame | undefined
 }
 
 /**
- * Parses stack frames into at most `maxSizeInBytes` of JSON. When every frame does not fit, frames
- * are kept in pairs from both ends; their original levels mark the omitted middle.
+ * Parses stack frames into at most `maxSizeInBytes` of JSON, keeping frames from both ends.
+ *
+ * Neither end of the capped result can contain more than `maxSizeInBytes` of frames, so only the
+ * longest head prefix and tail suffix within that budget are retained while streaming. Memory stays
+ * proportional to the budget rather than to the raw stack.
  */
 function parseStack(stack: string, maxSizeInBytes: number): readonly StackFrame[] | undefined {
-  const frames: StackFrame[] = [];
-  const sizes: number[] = [];
-  let totalSize = 2;
-  for (const line of stack.split("\n")) {
-    const frame = parseStackFrame(line.trim(), frames.length);
+  const head: StackFrame[] = [];
+  const headSizes: number[] = [];
+  let headSize = 2;
+  let headComplete = true;
+  let tail: StackFrame[] = [];
+  let tailSizes: number[] = [];
+  let tailStart = 0;
+  let tailSize = 2;
+  let frameCount = 0;
+
+  for (let start = 0; start <= stack.length;) {
+    const newline = stack.indexOf("\n", start);
+    const end = newline < 0 ? stack.length : newline;
+    const frame = parseStackFrame(stack.slice(start, end).trim(), frameCount);
+    start = end + 1;
     if (!frame) continue;
+    frameCount++;
+
     const size = getUtf8Size(JSON.stringify(frame));
-    totalSize += size + (frames.length > 0 ? 1 : 0);
-    frames.push(frame);
-    sizes.push(size);
+    if (headComplete && headSize + (head.length > 0 ? 1 : 0) + size <= maxSizeInBytes) {
+      headSize += (head.length > 0 ? 1 : 0) + size;
+      head.push(frame);
+      headSizes.push(size);
+    } else {
+      headComplete = false;
+    }
+
+    tailSize += (tail.length > tailStart ? 1 : 0) + size;
+    tail.push(frame);
+    tailSizes.push(size);
+    while (tailSize > maxSizeInBytes && tailStart < tail.length) {
+      tailSize -= tailSizes[tailStart] + (tail.length - tailStart > 1 ? 1 : 0);
+      tailStart++;
+    }
+    if (tailStart > 64 && tailStart * 2 > tail.length) {
+      tail = tail.slice(tailStart);
+      tailSizes = tailSizes.slice(tailStart);
+      tailStart = 0;
+    }
   }
-  if (frames.length === 0) return undefined;
-  if (totalSize <= maxSizeInBytes) return frames;
+
+  if (frameCount === 0) return undefined;
+  if (headComplete) return head;
+
+  // Merge the windows. Frames between them (or after the head, if no tail frame fits) were dropped,
+  // so the capping loop below must stop at that gap, exactly as it would on reaching a frame that
+  // cannot fit within the budget.
+  const frames = head.slice();
+  const sizes = headSizes.slice();
+  let gapIndex = head.length;
+  for (let index = tailStart; index < tail.length; index++) {
+    if (tail[index].level < head.length) continue;
+    if (frames.length === head.length && tail[index].level === head.length) gapIndex = -1;
+    frames.push(tail[index]);
+    sizes.push(tailSizes[index]);
+  }
 
   const first: StackFrame[] = [];
   const last: StackFrame[] = [];
   let selectedSize = 2;
-  for (let left = 0, right = frames.length - 1; left <= right; left++, right--) {
+  let left = 0;
+  let right = frames.length - 1;
+  while (left <= right && left !== gapIndex && right !== gapIndex - 1) {
     const isPair = left !== right;
-    const addedSize = sizes[left] + (isPair ? sizes[right] + 1 : 0) + (first.length > 0 ? 1 : 0);
+    const addedSize =
+      sizes[left] +
+      (isPair ? sizes[right] : 0) +
+      (first.length + last.length === 0 ? 0 : 1) +
+      (isPair ? 1 : 0);
     if (selectedSize + addedSize > maxSizeInBytes) break;
     first.push(frames[left]);
     if (isPair) last.push(frames[right]);
     selectedSize += addedSize;
+    left++;
+    right--;
   }
-  return first.length === 0 ? undefined : [...first, ...last.reverse()];
+
+  const capped = [...first, ...last.reverse()];
+  // Preserve original levels so gaps identify frames omitted from the middle by byte capping.
+  return capped.length === 0 ? undefined : capped;
 }
 
 /**

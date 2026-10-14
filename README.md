@@ -141,8 +141,8 @@ Policy requirements, and generating the snippet with `getSdkLoaderScript()`.
 | `resource`            | `Resource`                             | OpenTelemetry default resource     | Resource attributes attached to every span and log record                   |
 | `session`             | `{ enabled?: boolean }`                | Disabled                           | Adds a persisted `session.id` with a 30-minute inactivity timeout           |
 | `traces`              | `MicrosoftOpenTelemetryBrowserTraceOptions` | Browser SDK defaults          | Replaces the browser context manager or trace propagators                    |
-| `spanProcessors`      | `SpanProcessor[]`                      | Upstream default when applicable   | Registers custom trace processors; `[]` skips trace initialization          |
-| `logRecordProcessors` | `LogRecordProcessor[]`                 | Upstream default when applicable   | Registers custom log processors; `[]` skips log initialization              |
+| `spanProcessors`      | `SpanProcessor[]`                      | Azure Monitor only, if configured  | Registers custom trace processors; `[]` skips trace initialization          |
+| `logRecordProcessors` | `LogRecordProcessor[]`                 | Azure Monitor only, if configured  | Registers custom log processors; `[]` skips log initialization              |
 | `instrumentations`    | `BrowserInstrumentation[]`             | `[]`                               | Instrumentation instances owned and registered by this SDK                  |
 | `pageView`            | `PageViewInstrumentationConfig`        | Enabled                            | Configures built-in `browser.page_view` log collection                      |
 
@@ -238,8 +238,8 @@ The size depends on how the package is loaded. Sizes in KiB, measured from the c
 
 | Loaded from | Includes                                          | Minified |  gzip | Brotli |
 | ----------- | ------------------------------------------------- | -------: | ----: | -----: |
-| npm         | Distribution, page views and Azure Monitor export |    112.9 |  35.2 |   31.1 |
-| CDN         | Everything except the npm-only resource detectors |    154.0 |  46.7 |   40.9 |
+| npm         | Distribution, page views and Azure Monitor export |    115.2 |  36.0 |   31.8 |
+| CDN         | Everything except the npm-only resource detectors |    156.4 |  47.6 |   41.6 |
 
 **npm.** The application's bundler removes code the application does not use. Instrumentations are
 loaded through dynamic imports only when enabled, so each one adds only its own code. Gzip added

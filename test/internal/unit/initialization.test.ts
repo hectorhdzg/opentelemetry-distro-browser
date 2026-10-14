@@ -28,6 +28,7 @@ import { AzureMonitorLogRecordExporter } from "../../../src/exporter/log.js";
 import { AzureMonitorSpanExporter } from "../../../src/exporter/trace.js";
 import { noopLoggerProvider, noopTracerProvider } from "../../../src/routing/instanceRouter.js";
 import { startTelemetryInstance } from "../../../src/routing/telemetryInstance.js";
+import { getSharedRegistry } from "../../../src/shared/globalOwnership.js";
 import { createInMemoryPipeline } from "../../fixtures/telemetry.js";
 import { ApplicationInsightsSampler, PageOperationSampler } from "../../../src/sampling.js";
 import { AzureMonitorSamplingLogRecordProcessor } from "../../../src/samplingLogRecordProcessor.js";
@@ -619,7 +620,12 @@ it("propagates initialization failures without returning a success-shaped handle
 it.each([undefined, {}])(
   "skips both providers without a telemetry destination %j",
   async (options) => {
-    const warn = vi.spyOn(diag, "warn");
+    getSharedRegistry().diagInitialized = false;
+    // Capture what reaches the logger the SDK installs, proving the warning follows installation.
+    const installed = { warn: vi.fn(), error() {}, info() {}, debug() {}, verbose() {} };
+    const setLogger = diag.setLogger.bind(diag);
+    vi.spyOn(diag, "setLogger").mockImplementation((_logger, level) => setLogger(installed, level));
+    const warn = installed.warn;
     const registerTrace = vi.spyOn(trace, "setGlobalTracerProvider");
     const registerLogs = vi.spyOn(logs, "setGlobalLoggerProvider");
     const detectBrowser = vi.spyOn(browserDetector, "detect");

@@ -265,11 +265,8 @@ export async function useMicrosoftOpenTelemetry(
         ownedProcessors.push(logProcessor);
         logRecordProcessors = [logProcessor, ...(logRecordProcessors ?? [])];
       }
-    } else if (!spanProcessors && !logRecordProcessors) {
-      diag.warn(
-        "No telemetry destination: set azureMonitor, spanProcessors or logRecordProcessors",
-      );
     }
+    const noDestination = !azureMonitor && !spanProcessors && !logRecordProcessors;
     await session?.start();
     spanProcessors ??= [];
     logRecordProcessors ??= [];
@@ -300,6 +297,12 @@ export async function useMicrosoftOpenTelemetry(
     // Ownership transfers on call, including failed startup.
     processorsTransferred = true;
     instance = await startTelemetryInstance(instanceOptions);
+    // Warn only once the instance has installed the console diagnostic logger.
+    if (noDestination) {
+      diag.warn(
+        "No telemetry destination: set azureMonitor, spanProcessors or logRecordProcessors",
+      );
+    }
     releaseInstrumentations = claimInstrumentations(instrumentations);
     removeUnloadSubscription = subscribeToUnload(flushForUnload);
 
